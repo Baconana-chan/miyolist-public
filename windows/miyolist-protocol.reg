@@ -1,0 +1,15 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CLASSES_ROOT\miyolist]
+@="URL:MiyoList Protocol"
+"URL Protocol"=""
+
+[HKEY_CLASSES_ROOT\miyolist\DefaultIcon]
+@="miyolist.exe,1"
+
+[HKEY_CLASSES_ROOT\miyolist\shell]
+
+[HKEY_CLASSES_ROOT\miyolist\shell\open]
+
+[HKEY_CLASSES_ROOT\miyolist\shell\open\command]
+@="\"C:\\Path\\To\\Your\\miyolist.exe\" \"%1\""
