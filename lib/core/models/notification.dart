@@ -48,6 +48,17 @@ class AniListNotification {
   factory AniListNotification.fromJson(Map<String, dynamic> json) {
     final type = json['type'] as String?;
     
+    // Safe parsing of createdAt - handle both int and null
+    DateTime createdAt;
+    final createdAtValue = json['createdAt'];
+    if (createdAtValue != null) {
+      createdAt = DateTime.fromMillisecondsSinceEpoch(
+        (createdAtValue as int) * 1000,
+      );
+    } else {
+      createdAt = DateTime.now(); // Fallback to current time
+    }
+    
     return AniListNotification(
       id: json['id'] as int,
       type: type ?? 'UNKNOWN',
@@ -64,9 +75,7 @@ class AniListNotification {
       threadTitle: json['thread']?['title'] as String?,
       context: json['context'] as String?,
       reason: json['reason'] as String?,
-      createdAt: DateTime.fromMillisecondsSinceEpoch(
-        (json['createdAt'] as int) * 1000,
-      ),
+      createdAt: createdAt,
       isRead: false, // AniList не возвращает это поле в списке, только при просмотре
     );
   }
@@ -126,11 +135,13 @@ class AniListNotification {
       case 'ACTIVITY_REPLY':
       case 'ACTIVITY_REPLY_LIKE':
       case 'ACTIVITY_MENTION':
+      case 'ACTIVITY_MESSAGE':
         return '❤️';
       case 'THREAD_COMMENT_LIKE':
       case 'THREAD_COMMENT_REPLY':
       case 'THREAD_SUBSCRIBED':
       case 'THREAD_COMMENT_MENTION':
+      case 'THREAD_LIKE':
         return '💬';
       case 'FOLLOWING':
         return '👤';
@@ -150,11 +161,13 @@ class AniListNotification {
       case 'ACTIVITY_REPLY':
       case 'ACTIVITY_REPLY_LIKE':
       case 'ACTIVITY_MENTION':
+      case 'ACTIVITY_MESSAGE':
         return 'Activity';
       case 'THREAD_COMMENT_LIKE':
       case 'THREAD_COMMENT_REPLY':
       case 'THREAD_SUBSCRIBED':
       case 'THREAD_COMMENT_MENTION':
+      case 'THREAD_LIKE':
         return 'Forum';
       case 'FOLLOWING':
         return 'Follows';
@@ -181,6 +194,8 @@ class AniListNotification {
         return '${userName ?? 'Someone'} liked your reply.';
       case 'ACTIVITY_MENTION':
         return '${userName ?? 'Someone'} mentioned you in an activity.';
+      case 'ACTIVITY_MESSAGE':
+        return '${userName ?? 'Someone'} sent you a message.';
       case 'THREAD_COMMENT_LIKE':
         return '${userName ?? 'Someone'} liked your comment.';
       case 'THREAD_COMMENT_REPLY':
@@ -189,6 +204,8 @@ class AniListNotification {
         return '${userName ?? 'Someone'} commented in your subscribed forum thread ${threadTitle ?? ''}.';
       case 'THREAD_COMMENT_MENTION':
         return '${userName ?? 'Someone'} mentioned you in ${threadTitle ?? 'a thread'}.';
+      case 'THREAD_LIKE':
+        return '${userName ?? 'Someone'} liked your forum thread${threadTitle != null ? ', $threadTitle' : ''}.';
       case 'FOLLOWING':
         return '${userName ?? 'Someone'} started following you.';
       case 'RELATED_MEDIA_ADDITION':

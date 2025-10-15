@@ -1,13 +1,15 @@
 import 'package:graphql_flutter/graphql_flutter.dart';
 import '../models/airing_episode.dart';
 import 'auth_service.dart';
+import 'local_storage_service.dart';
 
 /// Сервис для работы с расписанием выхода эпизодов
 class AiringScheduleService {
   final AuthService _authService;
+  final LocalStorageService _localStorageService;
   GraphQLClient? _client;
   
-  AiringScheduleService(this._authService);
+  AiringScheduleService(this._authService, this._localStorageService);
   
   Future<void> _ensureInitialized() async {
     if (_client != null) return;
@@ -86,6 +88,7 @@ class AiringScheduleService {
                   english
                 }
                 episodes
+                isAdult
                 coverImage {
                   large
                 }
@@ -109,6 +112,7 @@ class AiringScheduleService {
                   english
                 }
                 episodes
+                isAdult
                 coverImage {
                   large
                 }
@@ -132,6 +136,7 @@ class AiringScheduleService {
                   english
                 }
                 episodes
+                isAdult
                 coverImage {
                   large
                 }
@@ -180,6 +185,12 @@ class AiringScheduleService {
           final nextAiring = media['nextAiringEpisode'] as Map<String, dynamic>?;
           if (nextAiring == null) continue; // Пропускаем если нет следующего эпизода
           
+          // Фильтруем взрослый контент
+          final isAdult = media['isAdult'] as bool? ?? false;
+          if (isAdult && _localStorageService.shouldHideAdultContent()) {
+            continue; // Пропускаем взрослый контент если включена фильтрация
+          }
+          
           final episode = nextAiring['episode'] as int;
           final airingAt = DateTime.fromMillisecondsSinceEpoch(
             (nextAiring['airingAt'] as int) * 1000,
@@ -205,6 +216,7 @@ class AiringScheduleService {
             title: (title['romaji'] ?? title['english'] ?? 'Unknown') as String,
             coverImageUrl: coverImage?['large'] as String?,
             totalEpisodes: media['episodes'] as int?,
+            isAdult: isAdult,
           ));
         }
       }

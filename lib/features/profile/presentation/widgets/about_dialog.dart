@@ -44,7 +44,7 @@ class AboutAppDialog extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Version 1.1.2+3',
+              'Version v1.0.1 "Aoi (葵)"',
               style: TextStyle(
                 fontSize: 14,
                 color: AppTheme.textGray,
@@ -61,7 +61,59 @@ class AboutAppDialog extends StatelessWidget {
                     // Description
                     _buildSection(
                       title: '📱 Description',
-                      content: 'MiyoList is a powerful anime and manga tracking application that helps you manage your watchlist, discover new content, and sync your progress across devices.',
+                      content: 'MiyoList is a powerful anime and manga tracking application that helps you manage your watchlist, discover new content, sync your progress across devices, and stay updated with the latest releases. Features include intelligent search, activity feed with airing schedules, privacy controls, statistics tracking, crash reporting, and automatic app updates.',
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    // What's New in v1.0.0 "Aoi (葵)"
+                    _buildSection(
+                      title: '🎉 What\'s New in v1.0.0 "Aoi (葵)"',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildFeatureItem(
+                            '📺 Activity Feed & Airing Schedule',
+                            'Stay up-to-date with today\'s releases, upcoming episodes, and real-time countdown timers. Auto-refreshes every minute!',
+                          ),
+                          _buildFeatureItem(
+                            '🔍 Advanced Global Search',
+                            'Search across anime, manga, characters, staff, and studios with powerful filters including adult content toggle, format filters, and genre selection.',
+                          ),
+                          _buildFeatureItem(
+                            '🔒 Privacy & Profile Controls',
+                            'Full control over your profile visibility with public/private mode, custom tab visibility, and granular sync settings.',
+                          ),
+                          _buildFeatureItem(
+                            '📊 Statistics & Analytics',
+                            'Comprehensive stats tracking: watch time, episode counts, genre distribution, format breakdown, score analytics, and completion rates.',
+                          ),
+                          _buildFeatureItem(
+                            '🐛 Crash Reporting System',
+                            'Automatic crash detection with detailed logs, privacy-focused reporting, and session tracking for improved stability.',
+                          ),
+                          _buildFeatureItem(
+                            '🔄 App Update System',
+                            'Automatic update checks, changelog display, download links, reminder intervals, and manual check support via GitHub releases.',
+                          ),
+                          _buildFeatureItem(
+                            '🎨 Theme Customization',
+                            'Dark theme with customizable view modes (grid/list/compact) for anime, manga, and light novels.',
+                          ),
+                          _buildFeatureItem(
+                            '💾 Image Cache Management',
+                            'Smart image caching with size limits, auto-cleanup, and manual cache management up to 2GB.',
+                          ),
+                          _buildFeatureItem(
+                            '🔗 Rich Text Support',
+                            'Markdown rendering with clickable AniList links (anime, manga, characters, users) and external URL support.',
+                          ),
+                          _buildFeatureItem(
+                            '📱 Status Filtering',
+                            'Smart filter badges showing counts for each status (Watching, Completed, Planning, etc.) including ALL items.',
+                          ),
+                        ],
+                      ),
                     ),
 
                     const SizedBox(height: 24),
@@ -150,6 +202,11 @@ class AboutAppDialog extends StatelessWidget {
                             'dio - HTTP client',
                             'intl - Date/number formatting',
                             'flutter_bloc - State management',
+                            'package_info_plus - App version info',
+                            'path_provider - File system paths',
+                            'shared_preferences - Key-value storage',
+                            'fl_chart - Statistics charts',
+                            'flutter_local_notifications - Push notifications',
                           ]),
                           const SizedBox(height: 16),
                           _buildTechCategory('Architecture & Patterns', [
@@ -205,26 +262,19 @@ class AboutAppDialog extends StatelessWidget {
                             context: context,
                             icon: Icons.code,
                             label: 'View Source',
-                            onPressed: () => _launchURL('https://github.com/yourusername/miyolist'),
+                            onPressed: () => _launchURL('https://github.com/Baconana-chan/miyolist-public'),
                           ),
                           _buildActionButton(
                             context: context,
                             icon: Icons.bug_report,
                             label: 'Report Issue',
-                            onPressed: () => _launchURL('https://github.com/yourusername/miyolist/issues'),
+                            onPressed: () => _launchURL('https://github.com/Baconana-chan/miyolist-public/issues'),
                           ),
                           _buildActionButton(
                             context: context,
-                            icon: Icons.star,
-                            label: 'Rate App',
-                            onPressed: () {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Coming soon to app stores!'),
-                                  duration: Duration(seconds: 2),
-                                ),
-                              );
-                            },
+                            icon: Icons.download,
+                            label: 'Download Updates',
+                            onPressed: () => _launchURL('https://github.com/Baconana-chan/miyolist-public/releases'),
                           ),
                         ],
                       ),
@@ -314,6 +364,51 @@ class AboutAppDialog extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildFeatureItem(String title, String description) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            margin: const EdgeInsets.only(top: 2),
+            width: 6,
+            height: 6,
+            decoration: const BoxDecoration(
+              color: AppTheme.accentRed,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textWhite,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  description,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppTheme.textGray,
+                    height: 1.4,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

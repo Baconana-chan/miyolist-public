@@ -8,7 +8,12 @@ import 'core/services/local_storage_service.dart';
 import 'core/services/supabase_service.dart';
 import 'core/services/image_cache_service.dart';
 import 'core/services/crash_reporter.dart';
+import 'core/services/update_service.dart';
+import 'core/services/custom_themes_service.dart';
+import 'core/services/push_notification_service.dart';
+import 'core/services/anilist_service.dart';
 import 'core/providers/theme_provider.dart';
+import 'core/widgets/update_dialog.dart';
 import 'features/auth/presentation/pages/login_page.dart';
 import 'features/main/presentation/pages/main_page.dart';
 import 'features/common/widgets/crash_report_dialog.dart';
@@ -56,12 +61,58 @@ void main() async {
   // Initialize local storage
   await LocalStorageService.init();
   
+  // Initialize adult content filter notifier
+  final localStorage = LocalStorageService();
+  LocalStorageService.adultContentFilterNotifier.value = localStorage.shouldHideAdultContent();
+  
   // Initialize Supabase
   final supabaseService = SupabaseService();
   await supabaseService.init();
   
   // Initialize image cache service
   await ImageCacheService().initialize();
+  
+  // Initialize custom themes service
+  final customThemesService = CustomThemesService();
+  await customThemesService.init();
+  
+  // Initialize push notification service and set up callbacks
+  final pushService = PushNotificationService();
+  await pushService.initialize();
+  
+  // Set up callbacks for notification actions
+  final authService = AuthService();
+  final anilistService = AniListService(authService);
+  
+  // Callback для пометки эпизода как просмотренного
+  pushService.onMarkEpisodeWatched = (int mediaId, int episode) async {
+    try {
+      // Обновить прогресс через AniList
+      await anilistService.updateMediaListEntry(
+        mediaId: mediaId,
+        progress: episode,
+      );
+      print('✅ Episode $episode marked as watched for anime $mediaId');
+    } catch (e) {
+      print('❌ Error updating episode progress: $e');
+      rethrow;
+    }
+  };
+  
+  // Callback для добавления аниме в Planning
+  pushService.onAddToPlanning = (int mediaId) async {
+    try {
+      // Добавить аниме в Planning через AniList
+      await anilistService.updateMediaListEntry(
+        mediaId: mediaId,
+        status: 'PLANNING',
+      );
+      print('✅ Anime $mediaId added to Planning');
+    } catch (e) {
+      print('❌ Error adding anime to Planning: $e');
+      rethrow;
+    }
+  };
   
   // Catch async errors with zone
   runZonedGuarded(() {
@@ -71,6 +122,8 @@ void main() async {
           ChangeNotifierProvider(
             create: (_) => ThemeProvider(LocalStorageService()),
           ),
+          // Provide custom themes service
+          Provider<CustomThemesService>.value(value: customThemesService),
         ],
         child: MyApp(
           authService: AuthService(),
@@ -110,6 +163,7 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _crashCheckCompleted = false;
+  bool _welcomeCheckCompleted = false;
 
   @override
   void initState() {
@@ -148,6 +202,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   }
 
   Future<void> _checkWelcomeScreen(BuildContext context) async {
+    // Prevent multiple calls
+    if (_welcomeCheckCompleted) return;
+    _welcomeCheckCompleted = true;
+    
     // Wait a bit to ensure everything is loaded
     await Future.delayed(const Duration(milliseconds: 500));
     
@@ -173,6 +231,70 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _checkForUpdates(BuildContext context) async {
+    try {
+      // Get user settings
+      final settings = await widget.localStorageService.getUserSettings();
+      
+      // Check if auto-check is enabled
+      if (settings?.autoCheckUpdates != true) {
+        print('[Main] Auto-check updates disabled');
+        return;
+      }
+
+      // Wait a bit to avoid interfering with startup
+      await Future.delayed(const Duration(seconds: 2));
+      
+      if (!mounted) return;
+
+      // Check for updates
+      final updateService = UpdateService();
+      final updateInfo = await updateService.checkForUpdates();
+
+      if (updateInfo == null) {
+        print('[Main] No updates available');
+        return;
+      }
+
+      // Check if should show reminder
+      final shouldShow = await updateService.shouldShowUpdateReminder(updateInfo);
+      if (!shouldShow) {
+        print('[Main] Update reminder skipped');
+        return;
+      }
+
+      // Update last check time
+      await updateService.updateLastCheckTime();
+
+      // Show update dialog
+      if (!mounted) return;
+      
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => UpdateDialog(
+          updateInfo: updateInfo,
+          onSkip: () async {
+            // User clicked "Skip this version"
+            await updateService.setSkippedVersion(updateInfo.version);
+            print('[Main] Skipped version ${updateInfo.version}');
+          },
+          onRemindLater: () async {
+            // User clicked "Remind me later"
+            await updateService.updateLastCheckTime();
+            print('[Main] Update reminder postponed');
+          },
+          onUpdate: () {
+            // User clicked "Download" - already handled in dialog
+            print('[Main] User initiated update download');
+          },
+        ),
+      );
+    } catch (e) {
+      print('[Main] Error checking for updates: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<ThemeProvider>(
@@ -187,6 +309,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 _checkForCrash(context);
                 _checkWelcomeScreen(context);
+                _checkForUpdates(context);
               });
               
               return FutureBuilder<bool>(

@@ -172,7 +172,14 @@ class UserStatistics {
     // Format distribution
     final formatDistribution = <String, int>{};
     for (final entry in [...animeList, ...mangaList]) {
-      final format = entry.media?.format ?? 'UNKNOWN';
+      final format = entry.media?.format;
+      
+      // Skip entries without format (usually PLANNING status for unreleased media)
+      if (format == null || format.isEmpty) {
+        print('⚠️ Skipping entry with null/empty format: mediaId=${entry.mediaId}, status=${entry.status}');
+        continue;
+      }
+      
       formatDistribution[format] = (formatDistribution[format] ?? 0) + 1;
     }
     

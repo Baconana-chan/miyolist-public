@@ -382,6 +382,7 @@ class SupabaseService {
           ? DateTime.parse(json['cached_at'] as String)
           : DateTime.now(),
       duration: json['duration'] as int?,
+      isAdult: json['is_adult'] as bool?,
     );
   }
 }

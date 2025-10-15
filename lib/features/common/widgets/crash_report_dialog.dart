@@ -152,7 +152,7 @@ class CrashReportDialog extends StatelessWidget {
                           _buildLinkRow(
                             Icons.code,
                             'GitHub Issues',
-                            'github.com/Baconana-chan/miyolist-public/issues',
+                            'github.com/Baconana-chan/miyolist/issues',
                           ),
                           const SizedBox(height: 8),
                           _buildLinkRow(

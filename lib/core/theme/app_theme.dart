@@ -19,6 +19,12 @@ class AppTheme {
   static const Color cardGray = Color(0xFF1E1E1E);
   static const Color borderGray = Color(0xFF3A3A3A);
   
+  // Activity history colors
+  static const Color accentGreen = Color(0xFF4CAF50);
+  static const Color accentOrange = Color(0xFFFF9800);
+  static const Color accentPurple = Color(0xFF9C27B0);
+  static const Color accentYellow = Color(0xFFFFC107);
+  
   // Manga ink effect colors
   static const Color inkBlack = Color(0xFF000000);
   static const Color paperWhite = Color(0xFFF8F8F8);

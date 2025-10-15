@@ -66,7 +66,7 @@ class TodayReleasesSection extends StatelessWidget {
         
         // Horizontal Scroll
         SizedBox(
-          height: 260,
+          height: 280,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -224,13 +224,14 @@ class _TodayEpisodeCard extends StatelessWidget {
             
             // Title
             Padding(
-              padding: const EdgeInsets.all(10),
+              padding: const EdgeInsets.all(12),
               child: Text(
                 episode.title,
                 style: const TextStyle(
                   color: AppTheme.textWhite,
-                  fontSize: 14,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
+                  height: 1.3,
                 ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,

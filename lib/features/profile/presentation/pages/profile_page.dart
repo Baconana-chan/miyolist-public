@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:provider/provider.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/anilist_service.dart';
 import '../../../../core/services/local_storage_service.dart';
 import '../../../../core/services/supabase_service.dart';
+import '../../../../core/services/custom_themes_service.dart';
 import '../../../../core/models/user_model.dart';
 import '../../../../core/models/user_settings.dart';
 import '../../../../core/theme/app_theme.dart';
@@ -13,11 +15,18 @@ import '../../../character/presentation/pages/character_details_page.dart';
 import '../../../staff/presentation/pages/staff_details_page.dart';
 import '../../../studio/presentation/pages/studio_details_page.dart';
 import '../../../statistics/presentation/pages/statistics_page.dart';
+import '../../../themes/custom_themes_page.dart';
+import '../../../settings/presentation/pages/push_notification_settings_page.dart';
 import '../widgets/privacy_settings_dialog.dart';
 import '../widgets/about_dialog.dart';
 import '../widgets/image_cache_settings_dialog.dart';
+import '../widgets/update_settings_dialog.dart';
 import '../widgets/session_logs_dialog.dart';
 import '../widgets/rich_description_text.dart';
+import '../widgets/export_settings_dialog.dart';
+import '../../../image_gallery/presentation/image_gallery_page.dart';
+import '../../../social/domain/services/social_service.dart';
+import '../../../social/presentation/pages/following_followers_page.dart';
 
 
 class ProfilePage extends StatefulWidget {
@@ -42,11 +51,49 @@ class _ProfilePageState extends State<ProfilePage> {
   UserSettings? _settings;
   bool _isLoading = true;
   Map<String, dynamic>? _dbStats;
+  SocialService? _socialService;
+  AniListService? _anilistService;
+  int _followingCount = 0;
+  int _followersCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    _initializeSocialService();
+  }
+
+  Future<void> _initializeSocialService() async {
+    try {
+      _anilistService = AniListService(widget.authService);
+      final user = await _anilistService!.fetchCurrentUser();
+      if (mounted && user != null) {
+        setState(() {
+          _socialService = SocialService(_anilistService!.client);
+        });
+        _loadFollowingCounts(user['id'] as int);
+      }
+    } catch (e) {
+      print('Failed to initialize social service: $e');
+    }
+  }
+
+  Future<void> _loadFollowingCounts(int userId) async {
+    if (_socialService == null) return;
+
+    try {
+      final following = await _socialService!.getFollowing(userId, perPage: 1);
+      final followers = await _socialService!.getFollowers(userId, perPage: 1);
+      
+      if (mounted) {
+        setState(() {
+          _followingCount = following.length;
+          _followersCount = followers.length;
+        });
+      }
+    } catch (e) {
+      print('Failed to load following counts: $e');
+    }
   }
 
   Future<void> _loadUserData() async {
@@ -172,12 +219,27 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
+  Future<void> _showUpdateSettings() async {
+    await showDialog(
+      context: context,
+      builder: (context) => const UpdateSettingsDialog(),
+    );
+  }
+
+  Future<void> _showExportSettings() async {
+    await showDialog(
+      context: context,
+      builder: (context) => const ExportSettingsDialog(),
+    );
+  }
+
   void _navigateToStatistics() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => StatisticsPage(
           localStorageService: widget.localStorageService,
+          anilistService: AniListService(widget.authService),
         ),
       ),
     );
@@ -190,45 +252,167 @@ class _ProfilePageState extends State<ProfilePage> {
         title: const Text('Profile'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.info_outline),
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => const AboutAppDialog(),
-              );
-            },
-            tooltip: 'About',
-          ),
-          IconButton(
-            icon: const Icon(Icons.bug_report),
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => const SessionLogsDialog(),
-              );
-            },
-            tooltip: 'View Session Logs',
-          ),
-          IconButton(
-            icon: const Icon(Icons.image),
-            onPressed: () {
-              showDialog(
-                context: context,
-                builder: (context) => ImageCacheSettingsDialog(
-                  localStorageService: widget.localStorageService,
-                ),
-              );
-            },
-            tooltip: 'Image Cache',
-          ),
-          IconButton(
             icon: const Icon(Icons.settings),
             onPressed: _showPrivacySettings,
             tooltip: 'Privacy Settings',
           ),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: _handleLogout,
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            tooltip: 'More options',
+            onSelected: (value) {
+              switch (value) {
+                case 'about':
+                  showDialog(
+                    context: context,
+                    builder: (context) => const AboutAppDialog(),
+                  );
+                  break;
+                case 'logs':
+                  showDialog(
+                    context: context,
+                    builder: (context) => const SessionLogsDialog(),
+                  );
+                  break;
+                case 'gallery':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ImageGalleryPage(),
+                    ),
+                  );
+                  break;
+                case 'cache':
+                  showDialog(
+                    context: context,
+                    builder: (context) => ImageCacheSettingsDialog(
+                      localStorageService: widget.localStorageService,
+                    ),
+                  );
+                  break;
+                case 'themes':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => CustomThemesPage(
+                        themesService: Provider.of<CustomThemesService>(context, listen: false),
+                      ),
+                    ),
+                  );
+                  break;
+                case 'notifications':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const PushNotificationSettingsPage(),
+                    ),
+                  );
+                  break;
+                case 'updates':
+                  _showUpdateSettings();
+                  break;
+                case 'export':
+                  _showExportSettings();
+                  break;
+                case 'logout':
+                  _handleLogout();
+                  break;
+              }
+            },
+            itemBuilder: (context) => const [
+              PopupMenuItem(
+                value: 'about',
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('About App'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'logs',
+                child: Row(
+                  children: [
+                    Icon(Icons.bug_report, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('Session Logs'),
+                  ],
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'gallery',
+                child: Row(
+                  children: [
+                    Icon(Icons.photo_library, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('Offline Gallery'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'cache',
+                child: Row(
+                  children: [
+                    Icon(Icons.image, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('Image Cache'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'themes',
+                child: Row(
+                  children: [
+                    Icon(Icons.palette, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('Custom Themes'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'notifications',
+                child: Row(
+                  children: [
+                    Icon(Icons.notifications_active, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('Push Notifications'),
+                  ],
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'updates',
+                child: Row(
+                  children: [
+                    Icon(Icons.system_update_alt, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('App Updates'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'export',
+                child: Row(
+                  children: [
+                    Icon(Icons.folder_open, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('Export Settings'),
+                  ],
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'logout',
+                child: Row(
+                  children: [
+                    Icon(Icons.logout, color: AppTheme.accentRed),
+                    SizedBox(width: 12),
+                    Text('Logout', style: TextStyle(color: AppTheme.accentRed)),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -297,6 +481,98 @@ class _ProfilePageState extends State<ProfilePage> {
                           ],
                         ),
                       ),
+
+                      // Following/Followers counts
+                      if (_socialService != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            children: [
+                              // Following button
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => FollowingFollowersPage(
+                                          userId: _user!.id,
+                                          isFollowing: true,
+                                          socialService: _socialService!,
+                                          currentUserId: _user!.id,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(color: AppTheme.accentBlue.withOpacity(0.5)),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        '$_followingCount',
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                          color: AppTheme.accentBlue,
+                                        ),
+                                      ),
+                                      const Text(
+                                        'Following',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: AppTheme.textGray,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // Followers button
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => FollowingFollowersPage(
+                                          userId: _user!.id,
+                                          isFollowing: false,
+                                          socialService: _socialService!,
+                                          currentUserId: _user!.id,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  style: OutlinedButton.styleFrom(
+                                    side: BorderSide(color: AppTheme.accentGreen.withOpacity(0.5)),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        '$_followersCount',
+                                        style: const TextStyle(
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                          color: AppTheme.accentGreen,
+                                        ),
+                                      ),
+                                      const Text(
+                                        'Followers',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: AppTheme.textGray,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      const SizedBox(height: 16),
                       
                       // About
                       if (_user!.about != null && _user!.about!.isNotEmpty)

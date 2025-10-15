@@ -100,6 +100,11 @@ class MediaSearchService {
         return false;
       }
 
+      // Фильтр взрослого контента
+      if (media.isAdult == true && _localStorage.shouldHideAdultContent()) {
+        return false;
+      }
+
       // Поиск по названиям и синонимам
       final matchesRomaji = media.titleRomaji?.toLowerCase().contains(lowerQuery) ?? false;
       final matchesEnglish = media.titleEnglish?.toLowerCase().contains(lowerQuery) ?? false;
@@ -113,10 +118,24 @@ class MediaSearchService {
   }
 
   Future<List<MediaDetails>> _searchInSupabase(String query, String? type) async {
-    return await _supabase.searchMedia(query, type);
+    final results = await _supabase.searchMedia(query, type);
+    
+    // Фильтруем взрослый контент если необходимо
+    if (_localStorage.shouldHideAdultContent()) {
+      return results.where((media) => media.isAdult != true).toList();
+    }
+    
+    return results;
   }
 
   Future<List<MediaDetails>> _searchInAniList(String query, String? type) async {
-    return await _anilist.searchMedia(query, type);
+    final results = await _anilist.searchMedia(query, type);
+    
+    // Фильтруем взрослый контент если необходимо
+    if (_localStorage.shouldHideAdultContent()) {
+      return results.where((media) => media.isAdult != true).toList();
+    }
+    
+    return results;
   }
 }

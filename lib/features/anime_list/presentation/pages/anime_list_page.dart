@@ -122,6 +122,9 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
       final remaining = _fetchCooldown - now.difference(_lastFetchTime!);
       debugPrint('⏳ Skipping AniList fetch, cooldown active. ${remaining.inMinutes}m ${remaining.inSeconds % 60}s remaining');
     }
+    
+    // Слушаем изменения настройки взрослого контента и перезагружаем данные
+    LocalStorageService.adultContentFilterNotifier.addListener(_onAdultContentFilterChanged);
   }
 
   void _initializeTabController() {
@@ -209,7 +212,20 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
     _searchController.dispose();
     _tabController.dispose();
     _scrollController.dispose();
+    LocalStorageService.adultContentFilterNotifier.removeListener(_onAdultContentFilterChanged);
     super.dispose();
+  }
+  
+  void _onAdultContentFilterChanged() {
+    if (mounted) {
+      // Перезагружаем данные при изменении настройки фильтрации
+      setState(() {
+        _resetPagination('anime');
+        _resetPagination('manga'); 
+        _resetPagination('novel');
+      });
+      _loadData();
+    }
   }
 
   @override
@@ -373,18 +389,6 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
         return ViewMode.fromHiveValue(settings?.novelViewMode ?? 'grid');
       default:
         return ViewMode.grid;
-    }
-  }
-
-  IconData _getViewModeIcon() {
-    final mode = _getCurrentViewMode();
-    switch (mode) {
-      case ViewMode.grid:
-        return Icons.grid_view;
-      case ViewMode.list:
-        return Icons.view_list;
-      case ViewMode.compact:
-        return Icons.view_headline;
     }
   }
 
@@ -600,15 +604,14 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
         }
       }
       
-      // Get user's adult content setting
-      final user = widget.localStorageService.getUser();
-      final displayAdultContent = user?.displayAdultContent ?? false;
+      // Get user's adult content setting (combines local settings with AniList)
+      final shouldHideAdult = widget.localStorageService.shouldHideAdultContent();
       
       setState(() {
         _animeList = animeList;
         _mangaList = mangaList;
         _novelList = novelList;
-        _displayAdultContent = displayAdultContent;
+        _displayAdultContent = !shouldHideAdult;
         _isLoading = false;
       });
     } catch (e, stackTrace) {
@@ -649,8 +652,11 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
         );
       }
 
-      // Fetch anime list
-      final animeListData = await _anilist.fetchAnimeList(user.id);
+      // Fetch all media lists in a single optimized query
+      final allMediaLists = await _anilist.fetchAllMediaLists(user.id);
+      
+      // Process anime list
+      final animeListData = allMediaLists['anime'];
       if (animeListData != null && animeListData.isNotEmpty) {
         final animeList = animeListData
             .map((e) {
@@ -679,8 +685,8 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
         debugPrint('⚠️ No anime data fetched from AniList (will use local data)');
       }
 
-      // Fetch manga list (includes novels)
-      final mangaListData = await _anilist.fetchMangaList(user.id);
+      // Process manga list (includes novels)
+      final mangaListData = allMediaLists['manga'];
       if (mangaListData != null && mangaListData.isNotEmpty) {
         final mangaList = mangaListData
             .map((e) {
@@ -1079,14 +1085,49 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
               },
               tooltip: 'Search in list',
             ),
-            // View mode toggle
-            PopupMenuButton<ViewMode>(
-              icon: Icon(_getViewModeIcon()),
-              tooltip: 'View mode',
-              onSelected: (mode) => _changeViewMode(mode),
+            IconButton(
+              icon: const Icon(Icons.filter_list),
+              onPressed: _showFilterDialog,
+              tooltip: 'Filter & Sort',
+            ),
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: () => _fetchLatestFromAniList(showNotification: true),
+              tooltip: 'Refresh from AniList',
+            ),
+            // More options menu
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert),
+              tooltip: 'More options',
+              onSelected: (value) {
+                switch (value) {
+                  case 'view_grid':
+                    _changeViewMode(ViewMode.grid);
+                    break;
+                  case 'view_list':
+                    _changeViewMode(ViewMode.list);
+                    break;
+                  case 'view_compact':
+                    _changeViewMode(ViewMode.compact);
+                    break;
+                  case 'bulk_operations':
+                    setState(() {
+                      _isSelectionMode = true;
+                    });
+                    break;
+                  case 'global_search':
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const GlobalSearchPage(),
+                      ),
+                    );
+                    break;
+                }
+              },
               itemBuilder: (context) => [
                 PopupMenuItem(
-                  value: ViewMode.grid,
+                  value: 'view_grid',
                   child: Row(
                     children: [
                       Icon(
@@ -1108,7 +1149,7 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
                   ),
                 ),
                 PopupMenuItem(
-                  value: ViewMode.list,
+                  value: 'view_list',
                   child: Row(
                     children: [
                       Icon(
@@ -1130,7 +1171,7 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
                   ),
                 ),
                 PopupMenuItem(
-                  value: ViewMode.compact,
+                  value: 'view_compact',
                   child: Row(
                     children: [
                       Icon(
@@ -1151,40 +1192,30 @@ class _AnimeListPageState extends State<AnimeListPage> with SingleTickerProvider
                     ],
                   ),
                 ),
+                const PopupMenuDivider(),
+                const PopupMenuItem(
+                  value: 'bulk_operations',
+                  child: Row(
+                    children: [
+                      Icon(Icons.checklist, color: AppTheme.textGray),
+                      SizedBox(width: 12),
+                      Text('Bulk Operations'),
+                    ],
+                  ),
+                ),
+                const PopupMenuItem(
+                  value: 'global_search',
+                  child: Row(
+                    children: [
+                      Icon(Icons.public, color: AppTheme.textGray),
+                      SizedBox(width: 12),
+                      Text('Global Search'),
+                    ],
+                  ),
+                ),
               ],
             ),
-            IconButton(
-              icon: const Icon(Icons.filter_list),
-              onPressed: _showFilterDialog,
-              tooltip: 'Filter & Sort',
-            ),
-            IconButton(
-              icon: const Icon(Icons.checklist),
-              onPressed: () {
-                setState(() {
-                  _isSelectionMode = true;
-                });
-              },
-              tooltip: 'Bulk operations',
-            ),
-            IconButton(
-              icon: const Icon(Icons.public),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const GlobalSearchPage(),
-                  ),
-                );
-              },
-              tooltip: 'Global search',
-            ),
           ],
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _fetchLatestFromAniList(showNotification: true),
-            tooltip: 'Refresh from AniList',
-          ),
           IconButton(
             icon: _isSyncing
                 ? const SizedBox(

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../../../core/services/image_cache_service.dart';
+import '../../../../core/services/image_optimization_service.dart';
 import '../../../../core/services/local_storage_service.dart';
 import '../../../../core/theme/app_theme.dart';
+import 'dart:io';
 
 class ImageCacheSettingsDialog extends StatefulWidget {
   final LocalStorageService localStorageService;
@@ -17,10 +19,14 @@ class ImageCacheSettingsDialog extends StatefulWidget {
 
 class _ImageCacheSettingsDialogState extends State<ImageCacheSettingsDialog> {
   final _imageCacheService = ImageCacheService();
+  final _optimizationService = ImageOptimizationService();
   int _cacheSize = 0;
   int _imageCount = 0;
   bool _isLoading = true;
+  bool _isOptimizing = false;
   int _cacheLimitMB = 500;
+  int _optimizationProgress = 0;
+  int _optimizationTotal = 0;
 
   @override
   void initState() {
@@ -171,11 +177,94 @@ class _ImageCacheSettingsDialogState extends State<ImageCacheSettingsDialog> {
     }
   }
 
+  Future<void> _optimizeImages() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Optimize Images'),
+        content: const Text(
+          'This will compress all images to reduce file size. '
+          'This can reduce storage usage by 20-40% and improve loading times.\n\n'
+          'Original images will be replaced. This process may take a few minutes.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Optimize', style: TextStyle(color: Colors.green)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _isOptimizing = true;
+        _optimizationProgress = 0;
+        _optimizationTotal = 0;
+      });
+
+      try {
+        final cacheDir = await _imageCacheService.getCacheDirectory();
+        
+        final results = await _optimizationService.batchOptimize(
+          directory: Directory(cacheDir),
+          quality: 85,
+          convertToWebP: true,
+          maxWidth: 1200, // Limit max width for covers
+          generateThumbnails: false,
+          onProgress: (current, total) {
+            if (mounted) {
+              setState(() {
+                _optimizationProgress = current;
+                _optimizationTotal = total;
+              });
+            }
+          },
+        );
+        
+        await _loadCacheInfo();
+        
+        if (mounted) {
+          final optimized = results['optimized'] as int;
+          final saved = results['totalSaved'] as int;
+          final savedMB = (saved / (1024 * 1024)).toStringAsFixed(1);
+          
+          setState(() => _isOptimizing = false);
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '✓ Optimized $optimized images | Saved $savedMB MB',
+              ),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() => _isOptimizing = false);
+          
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error optimizing images: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Dialog(
       child: Container(
-        constraints: const BoxConstraints(maxWidth: 500),
+        constraints: const BoxConstraints(maxWidth: 500, maxHeight: 700),
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -201,14 +290,18 @@ class _ImageCacheSettingsDialogState extends State<ImageCacheSettingsDialog> {
             ),
             const SizedBox(height: 24),
             
-            if (_isLoading)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(32.0),
-                  child: CircularProgressIndicator(),
-                ),
-              )
-            else ...[
+            Flexible(
+              child: SingleChildScrollView(
+                child: _isLoading
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(32.0),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
               _buildInfoCard(
                 'Cover images for your list are automatically downloaded '
                 'and stored locally for faster loading and offline access.',
@@ -232,10 +325,70 @@ class _ImageCacheSettingsDialogState extends State<ImageCacheSettingsDialog> {
               _buildCacheLimitSetting(),
               const SizedBox(height: 24),
               
+              if (_isOptimizing) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppTheme.secondaryBlack,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.accentBlue.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              'Optimizing images... $_optimizationProgress / $_optimizationTotal',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      LinearProgressIndicator(
+                        value: _optimizationTotal > 0 
+                            ? _optimizationProgress / _optimizationTotal 
+                            : 0,
+                        backgroundColor: AppTheme.cardGray,
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          AppTheme.accentBlue,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+              
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _imageCount > 0 ? _clearOldCache : null,
+                  onPressed: (_imageCount > 0 && !_isOptimizing) ? _optimizeImages : null,
+                  icon: const Icon(Icons.auto_awesome),
+                  label: const Text('Optimize Images'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.all(16),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: (_imageCount > 0 && !_isOptimizing) ? _clearOldCache : null,
                   icon: const Icon(Icons.schedule_outlined),
                   label: const Text('Clear Old Cache (30+ days)'),
                   style: ElevatedButton.styleFrom(
@@ -250,7 +403,7 @@ class _ImageCacheSettingsDialogState extends State<ImageCacheSettingsDialog> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: _imageCount > 0 ? _clearCache : null,
+                  onPressed: (_imageCount > 0 && !_isOptimizing) ? _clearCache : null,
                   icon: const Icon(Icons.delete_sweep),
                   label: const Text('Clear All Cache'),
                   style: ElevatedButton.styleFrom(
@@ -260,7 +413,10 @@ class _ImageCacheSettingsDialogState extends State<ImageCacheSettingsDialog> {
                   ),
                 ),
               ),
-            ],
+                        ],
+                      ),
+              ),
+            ),
           ],
         ),
       ),

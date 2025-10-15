@@ -10,6 +10,7 @@ class AiringEpisode {
   final String title;
   final String? coverImageUrl;
   final int? totalEpisodes;
+  final bool isAdult;
   
   AiringEpisode({
     required this.id,
@@ -20,6 +21,7 @@ class AiringEpisode {
     required this.title,
     this.coverImageUrl,
     this.totalEpisodes,
+    this.isAdult = false,
   });
   
   factory AiringEpisode.fromJson(Map<String, dynamic> json) {
@@ -38,6 +40,7 @@ class AiringEpisode {
       title: (title['romaji'] ?? title['english'] ?? 'Unknown') as String,
       coverImageUrl: coverImage?['large'] as String?,
       totalEpisodes: media['episodes'] as int?,
+      isAdult: media['isAdult'] as bool? ?? false,
     );
   }
   

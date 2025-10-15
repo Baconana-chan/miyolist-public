@@ -13,6 +13,8 @@ import '../../../anime_list/presentation/widgets/edit_entry_dialog.dart';
 import '../../../character/presentation/pages/character_details_page.dart';
 import '../../../staff/presentation/pages/staff_details_page.dart';
 import '../../../studio/presentation/pages/studio_details_page.dart';
+import '../../../social/domain/services/social_service.dart';
+import '../../../social/presentation/widgets/following_media_section.dart';
 
 class MediaDetailsPage extends StatefulWidget {
   final int mediaId;
@@ -37,29 +39,67 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
   late final LocalStorageService _localStorage;
   late final AniListService _anilist;
   late final SupabaseService _supabase;
+  late final SocialService _socialService;
+  late final AuthService _authService;
   MediaDetails? _media;
   MediaListEntry? _listEntry; // Track if media is in user's list
   bool _isLoading = true;
   String? _error;
+  int? _currentUserId;
 
   @override
   void initState() {
     super.initState();
-    _initializeServices();
+    // Initialize services and load data asynchronously
+    _initializeAndLoad();
+  }
+
+  Future<void> _initializeAndLoad() async {
+    await _initializeServices();
     _loadMediaDetails();
   }
 
-  void _initializeServices() {
+  Future<void> _initializeServices() async {
     _localStorage = widget.localStorageService ?? LocalStorageService();
     _supabase = widget.supabaseService ?? SupabaseService();
-    final authService = AuthService();
-    _anilist = widget.anilistService ?? AniListService(authService);
+    _authService = AuthService();
+    _anilist = widget.anilistService ?? AniListService(_authService);
+    
+    // Ensure AniList client is initialized before creating SocialService
+    await _anilist.ensureInitialized();
+    _socialService = SocialService(_anilist.client);
 
     _searchService = MediaSearchService(
       localStorage: _localStorage,
       supabase: _supabase,
       anilist: _anilist,
     );
+
+    // Get current user ID
+    _loadCurrentUserId();
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    try {
+      // Check if user is authenticated
+      final token = await _authService.getAccessToken();
+      if (token == null) {
+        return; // Not authenticated
+      }
+      
+      // Try to get user from local storage via AniListService
+      // The service should have the user cached after authentication
+      if (mounted) {
+        // For now, we'll just check if authenticated
+        // The FollowingMediaSection will handle showing/hiding based on auth
+        // This is a simplified approach - user ID will be fetched by SocialService
+        setState(() {
+          _currentUserId = 1; // Placeholder - actual ID fetched by SocialService
+        });
+      }
+    } catch (e) {
+      print('Failed to load current user ID: $e');
+    }
   }
 
   Future<void> _loadMediaDetails() async {
@@ -222,6 +262,18 @@ class _MediaDetailsPageState extends State<MediaDetailsPage> {
               // Recommendations
               if (_media!.recommendations != null && _media!.recommendations!.isNotEmpty)
                 _buildRecommendations(),
+
+              // Following section - show users who have this media
+              if (_currentUserId != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: FollowingMediaSection(
+                    mediaId: _media!.id,
+                    mediaType: _media!.type,
+                    currentUserId: _currentUserId,
+                    socialService: _socialService,
+                  ),
+                ),
 
               // Status Distribution
               if (_media!.statusDistribution != null && _media!.statusDistribution!.isNotEmpty)

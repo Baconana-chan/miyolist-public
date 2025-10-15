@@ -1,71 +1,99 @@
-import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import 'dart:convert';
 import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
 import '../constants/app_constants.dart';
+import 'web_auth_handler.dart';
 
 class AuthService {
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
+  final WebAuthHandler _webAuthHandler = WebAuthHandler();
   
   /// Get platform-specific redirect URI
+  /// Now uses unified web redirect for all platforms
   String get redirectUri {
-    // Windows/Linux/MacOS require http://localhost
-    // Android/iOS can use custom scheme
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      return AppConstants.redirectUriDesktop;
-    } else {
-      return AppConstants.redirectUriMobile;
-    }
-  }
-  
-  /// Get callback URL scheme for flutter_web_auth_2
-  String get callbackUrlScheme {
-    // Desktop: must be 'http://localhost:PORT' (exact format required)
-    // Mobile: custom scheme without '://'
-    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-      return 'http://localhost:8080';
-    } else {
-      return 'miyolist';
-    }
+    return AppConstants.redirectUriWeb;
   }
 
-  /// Authenticate with AniList OAuth2
+  /// Authenticate with AniList OAuth2 via web
   /// Returns access token on success
   Future<String?> authenticateWithAniList() async {
     try {
-      // Build authorization URL with platform-specific redirect URI
-      final authUrl = Uri.parse(AppConstants.anilistAuthUrl).replace(
-        queryParameters: {
-          'client_id': AppConstants.anilistClientId,
-          'redirect_uri': redirectUri,
-          'response_type': 'code',
-        },
-      );
-
-      print('🔐 Auth URL: $authUrl');
-      print('📍 Redirect URI: $redirectUri');
-      print('🔗 Callback scheme: $callbackUrlScheme');
-
-      // Launch web authentication with platform-specific callback scheme
-      final result = await FlutterWebAuth2.authenticate(
-        url: authUrl.toString(),
-        callbackUrlScheme: callbackUrlScheme,
-      );
+      print('🔐 Starting web-based OAuth authentication...');
       
-      print('✅ Auth result: $result');
-
-      // Extract authorization code from callback
-      final code = Uri.parse(result).queryParameters['code'];
+      // Step 1: Open web browser with auth page
+      final webAuthUrl = Uri.parse(AppConstants.webAuthUrl);
+      
+      print('🌐 Opening browser: $webAuthUrl');
+      
+      if (await canLaunchUrl(webAuthUrl)) {
+        await launchUrl(
+          webAuthUrl,
+          mode: LaunchMode.externalApplication,
+        );
+      } else {
+        throw Exception('Could not launch auth URL: $webAuthUrl');
+      }
+      
+      // Step 2: Wait for authorization code
+      print('⏳ Waiting for authorization code...');
+      
+      final code = await _waitForAuthCode();
       
       if (code == null) {
-        throw Exception('Authorization code not found');
+        throw Exception('Failed to receive authorization code');
       }
-
+      
+      print('✅ Authorization code received: ${code.substring(0, 10)}...');
+      
+      // Step 3: Exchange code for access token
       print('🔄 Exchanging code for access token...');
-
-      // Exchange code for access token (use same redirect URI)
-      // AniList expects form-encoded data, not JSON
+      
+      final token = await _exchangeCodeForToken(code);
+      
+      if (token == null) {
+        throw Exception('Failed to exchange code for token');
+      }
+      
+      print('✅ Access token received successfully!');
+      
+      // Step 4: Save token securely
+      await saveAccessToken(token);
+      
+      return token;
+      
+    } catch (e) {
+      print('❌ Authentication error: $e');
+      return null;
+    }
+  }
+  
+  /// Wait for authorization code using appropriate method for platform
+  /// Takes an optional BuildContext for showing manual entry dialog
+  Future<String?> _waitForAuthCode() async {
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      // Desktop: Use HTTP server to receive callback
+      try {
+        return await _webAuthHandler.waitForAuthCode();
+      } catch (e) {
+        print('⚠️ HTTP server method failed: $e');
+        // Manual entry would require BuildContext, which we don't have here
+        // This should be handled at a higher level (in the UI layer)
+        return null;
+      }
+    } else {
+      // Mobile or other platforms
+      // TODO: Implement deep linking with app_links package
+      print('⚠️ Mobile deep linking not yet implemented');
+      return null;
+    }
+  }
+  
+  /// Exchange authorization code for access token
+  Future<String?> _exchangeCodeForToken(String code) async {
+    try {
       final tokenResponse = await http.post(
         Uri.parse(AppConstants.anilistTokenUrl),
         headers: {
@@ -82,23 +110,40 @@ class AuthService {
       );
 
       print('📥 Token response status: ${tokenResponse.statusCode}');
-      print('📥 Token response body: ${tokenResponse.body}');
-
+      
       if (tokenResponse.statusCode == 200) {
         final data = json.decode(tokenResponse.body);
-        final accessToken = data['access_token'] as String;
-        
-        print('✅ Access token received successfully!');
-        
-        // Save token securely
-        await saveAccessToken(accessToken);
-        
-        return accessToken;
+        return data['access_token'] as String;
       } else {
-        throw Exception('Failed to get access token: ${tokenResponse.body}');
+        print('❌ Token exchange failed: ${tokenResponse.body}');
+        return null;
       }
     } catch (e) {
-      print('Authentication error: $e');
+      print('❌ Token exchange error: $e');
+      return null;
+    }
+  }
+  
+  /// Authenticate with manual code entry
+  /// Use this when automatic code retrieval fails
+  Future<String?> authenticateWithManualCode(String code) async {
+    try {
+      print('🔐 Authenticating with manual code...');
+      
+      final token = await _exchangeCodeForToken(code);
+      
+      if (token == null) {
+        throw Exception('Failed to exchange code for token');
+      }
+      
+      print('✅ Access token received successfully!');
+      
+      await saveAccessToken(token);
+      
+      return token;
+      
+    } catch (e) {
+      print('❌ Manual authentication error: $e');
       return null;
     }
   }

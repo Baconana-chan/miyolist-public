@@ -35,17 +35,40 @@ class ImageCacheService {
     return '${mediaId}_$urlHash.$extension';
   }
 
-  /// Check if image exists locally
+  /// Check if image exists locally (checks both original and optimized formats)
   Future<File?> getLocalImage(String url, int mediaId) async {
     if (!_initialized) await initialize();
 
-    final filename = _generateFilename(url, mediaId);
-    final file = File('${_cacheDirectory!.path}/$filename');
-
-    if (await file.exists()) {
-      return file;
+    // Try to find the file with any extension (original or optimized)
+    final urlHash = md5.convert(utf8.encode(url)).toString().substring(0, 8);
+    final baseFilename = '${mediaId}_$urlHash';
+    
+    // Check for optimized format first (JPEG)
+    final jpegFile = File('${_cacheDirectory!.path}/$baseFilename.jpg');
+    if (await jpegFile.exists()) {
+      return jpegFile;
     }
+    
+    // Check for original format
+    final extension = url.split('.').last.split('?').first;
+    final originalFile = File('${_cacheDirectory!.path}/$baseFilename.$extension');
+    if (await originalFile.exists()) {
+      return originalFile;
+    }
+    
+    // Also check .png as fallback (common format)
+    final pngFile = File('${_cacheDirectory!.path}/$baseFilename.png');
+    if (await pngFile.exists()) {
+      return pngFile;
+    }
+    
     return null;
+  }
+  
+  /// Get cached image path for a specific media (checks all formats)
+  Future<String?> getCachedImagePath(String url, int mediaId) async {
+    final file = await getLocalImage(url, mediaId);
+    return file?.path;
   }
 
   /// Download and cache image
@@ -197,15 +220,15 @@ class ImageCacheService {
   Future<void> downloadBatch(List<({int mediaId, String? coverUrl})> mediaList) async {
     if (!_initialized) await initialize();
 
-    // Filter out media that already have cached images
+    // Filter out media that already have cached images (in any format)
     final toDownload = <({int mediaId, String coverUrl})>[];
     for (final media in mediaList) {
       if (media.coverUrl != null && media.coverUrl!.isNotEmpty) {
-        final filename = _generateFilename(media.coverUrl!, media.mediaId);
-        final file = File('${_cacheDirectory!.path}/$filename');
+        // Use getLocalImage to check all formats
+        final existingFile = await getLocalImage(media.coverUrl!, media.mediaId);
         
-        // Only add to download list if file doesn't exist
-        if (!await file.exists()) {
+        // Only add to download list if file doesn't exist in any format
+        if (existingFile == null) {
           toDownload.add((mediaId: media.mediaId, coverUrl: media.coverUrl!));
         }
       }
@@ -225,5 +248,11 @@ class ImageCacheService {
     }
     
     print('✅ Downloaded ${toDownload.length} new cover images');
+  }
+  
+  /// Get cache directory path
+  Future<String> getCacheDirectory() async {
+    if (!_initialized) await initialize();
+    return _cacheDirectory!.path;
   }
 }

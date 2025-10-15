@@ -61,6 +61,18 @@ class UserSettings extends HiveObject {
   @HiveField(18)
   final bool hasSeenWelcomeScreen; // Показывался ли welcome screen
 
+  @HiveField(19)
+  final bool autoCheckUpdates; // Автоматически проверять обновления при запуске
+
+  @HiveField(20)
+  final int updateReminderIntervalDays; // Интервал напоминаний об обновлениях (в днях)
+
+  @HiveField(21)
+  final bool hideAdultContent; // Скрывать 18+ контент во всем приложении
+
+  @HiveField(22)
+  final String? exportPath; // Кастомный путь для экспорта изображений (null = использовать папку приложения)
+
   UserSettings({
     required this.isPublicProfile,
     required this.enableCloudSync,
@@ -81,6 +93,10 @@ class UserSettings extends HiveObject {
     this.novelViewMode = 'grid', // По умолчанию grid
     this.imageCacheSizeLimitMB = 500, // По умолчанию 500 МБ
     this.hasSeenWelcomeScreen = false, // По умолчанию не показывался
+    this.autoCheckUpdates = true, // По умолчанию включено
+    this.updateReminderIntervalDays = 7, // По умолчанию напоминать раз в неделю
+    this.hideAdultContent = false, // По умолчанию не скрывать (будет определяться из настроек AniList)
+    this.exportPath, // null = папка приложения по умолчанию
   });
 
   factory UserSettings.defaultPrivate() {
@@ -103,6 +119,10 @@ class UserSettings extends HiveObject {
       novelViewMode: 'grid',
       imageCacheSizeLimitMB: 500,
       hasSeenWelcomeScreen: false,
+      autoCheckUpdates: true,
+      updateReminderIntervalDays: 7,
+      hideAdultContent: false,
+      exportPath: null,
     );
   }
 
@@ -126,6 +146,10 @@ class UserSettings extends HiveObject {
       novelViewMode: 'grid',
       imageCacheSizeLimitMB: 500,
       hasSeenWelcomeScreen: false,
+      autoCheckUpdates: true,
+      updateReminderIntervalDays: 7,
+      hideAdultContent: false,
+      exportPath: null,
     );
   }
 
@@ -149,6 +173,10 @@ class UserSettings extends HiveObject {
     String? novelViewMode,
     int? imageCacheSizeLimitMB,
     bool? hasSeenWelcomeScreen,
+    bool? autoCheckUpdates,
+    int? updateReminderIntervalDays,
+    bool? hideAdultContent,
+    String? exportPath,
   }) {
     return UserSettings(
       isPublicProfile: isPublicProfile ?? this.isPublicProfile,
@@ -170,6 +198,10 @@ class UserSettings extends HiveObject {
       novelViewMode: novelViewMode ?? this.novelViewMode,
       imageCacheSizeLimitMB: imageCacheSizeLimitMB ?? this.imageCacheSizeLimitMB,
       hasSeenWelcomeScreen: hasSeenWelcomeScreen ?? this.hasSeenWelcomeScreen,
+      autoCheckUpdates: autoCheckUpdates ?? this.autoCheckUpdates,
+      updateReminderIntervalDays: updateReminderIntervalDays ?? this.updateReminderIntervalDays,
+      hideAdultContent: hideAdultContent ?? this.hideAdultContent,
+      exportPath: exportPath ?? this.exportPath,
     );
   }
 
@@ -194,6 +226,10 @@ class UserSettings extends HiveObject {
       'novelViewMode': novelViewMode,
       'imageCacheSizeLimitMB': imageCacheSizeLimitMB,
       'hasSeenWelcomeScreen': hasSeenWelcomeScreen,
+      'autoCheckUpdates': autoCheckUpdates,
+      'updateReminderIntervalDays': updateReminderIntervalDays,
+      'hideAdultContent': hideAdultContent,
+      'exportPath': exportPath,
     };
   }
 
@@ -220,6 +256,10 @@ class UserSettings extends HiveObject {
       novelViewMode: json['novelViewMode'] as String? ?? 'grid',
       imageCacheSizeLimitMB: json['imageCacheSizeLimitMB'] as int? ?? 500,
       hasSeenWelcomeScreen: json['hasSeenWelcomeScreen'] as bool? ?? false,
+      autoCheckUpdates: json['autoCheckUpdates'] as bool? ?? true,
+      updateReminderIntervalDays: json['updateReminderIntervalDays'] as int? ?? 7,
+      hideAdultContent: json['hideAdultContent'] as bool? ?? false,
+      exportPath: json['exportPath'] as String?,
     );
   }
 }

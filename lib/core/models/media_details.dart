@@ -107,6 +107,9 @@ class MediaDetails extends HiveObject {
   @HiveField(33)
   final Map<String, int>? statusDistribution;
 
+  @HiveField(34)
+  final bool? isAdult;
+
   MediaDetails({
     required this.id,
     required this.type,
@@ -142,6 +145,7 @@ class MediaDetails extends HiveObject {
     this.staff,
     this.recommendations,
     this.statusDistribution,
+    this.isAdult,
   });
 
   factory MediaDetails.fromJson(Map<String, dynamic> json) {
@@ -198,6 +202,7 @@ class MediaDetails extends HiveObject {
                   .map((_, e) => MapEntry(
                       e['status'] as String, e['amount'] as int)))
           : null,
+      isAdult: json['isAdult'] as bool?,
     );
   }
 
@@ -244,6 +249,7 @@ class MediaDetails extends HiveObject {
                   .toList()
             }
           : null,
+      'isAdult': isAdult,
     };
   }
 
@@ -275,6 +281,7 @@ class MediaDetails extends HiveObject {
       'synonyms': synonyms,
       'cached_at': cachedAt.toIso8601String(),
       'duration': duration,
+      'is_adult': isAdult,
     };
   }
 

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'dart:io';
 import '../constants/app_constants.dart';
@@ -10,8 +11,13 @@ import '../models/character_details.dart';
 import '../models/staff_details.dart';
 import '../models/studio_details.dart';
 import '../models/sync_conflict.dart';
+import '../models/activity_entry.dart';
+import '../models/custom_theme.dart';
+import '../models/push_notification_settings.dart';
 
 class LocalStorageService {
+  // ValueNotifier для отслеживания изменений настройки взрослого контента
+  static final ValueNotifier<bool> adultContentFilterNotifier = ValueNotifier<bool>(false);
   /// Initialize Hive
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -37,6 +43,11 @@ class LocalStorageService {
     Hive.registerAdapter(SocialMediaLinkAdapter());
     Hive.registerAdapter(StudioDetailsAdapter());
     Hive.registerAdapter(StudioMediaAdapter());
+    Hive.registerAdapter(ActivityEntryAdapter());
+    Hive.registerAdapter(CustomThemeAdapter());
+    Hive.registerAdapter(PushNotificationSettingsAdapter());
+    Hive.registerAdapter(EpisodeNotificationTimingAdapter());
+    Hive.registerAdapter(AnimeNotificationSettingsAdapter());
     
     // Open boxes with error handling for schema changes
     try {
@@ -196,6 +207,9 @@ class LocalStorageService {
   /// Save user privacy settings
   Future<void> saveUserSettings(UserSettings settings) async {
     await settingsBox.put('user_settings', settings.toJson());
+    
+    // Уведомляем об изменении настройки взрослого контента
+    adultContentFilterNotifier.value = shouldHideAdultContent();
   }
 
   /// Get user privacy settings
@@ -215,6 +229,45 @@ class LocalStorageService {
   bool isCloudSyncEnabled() {
     final settings = getUserSettings();
     return settings?.enableCloudSync ?? false;
+  }
+
+  /// Initialize user settings based on AniList profile, if no settings exist
+  Future<UserSettings> initializeUserSettingsFromAniList(UserModel user, {bool isPublicProfile = false}) async {
+    final existingSettings = getUserSettings();
+    
+    if (existingSettings != null) {
+      return existingSettings;
+    }
+
+    // Create new settings based on AniList profile data
+    final settings = isPublicProfile 
+        ? UserSettings.defaultPublic() 
+        : UserSettings.defaultPrivate();
+
+    // Override hideAdultContent based on AniList setting (inverted logic)
+    final newSettings = settings.copyWith(
+      hideAdultContent: !user.displayAdultContent, // If AniList shows adult content, don't hide it by default
+      updatedAt: DateTime.now(),
+    );
+
+    // Save the new settings
+    await saveUserSettings(newSettings);
+    
+    // Initialize the notifier with the current value
+    adultContentFilterNotifier.value = shouldHideAdultContent();
+    
+    return newSettings;
+  }
+
+  /// Check if adult content should be hidden (combines local settings with AniList)
+  bool shouldHideAdultContent() {
+    final settings = getUserSettings();
+    if (settings?.hideAdultContent == true) {
+      return true; // Local setting overrides AniList setting
+    }
+    
+    final user = getUser();
+    return !(user?.displayAdultContent ?? false); // Fall back to AniList setting
   }
 
   /// Save conflict resolution strategy

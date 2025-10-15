@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:graphql_flutter/graphql_flutter.dart';
 import '../constants/app_constants.dart';
 import '../utils/rate_limiter.dart';
@@ -6,10 +7,13 @@ import '../models/character_details.dart';
 import '../models/staff_details.dart';
 import '../models/studio_details.dart';
 import 'auth_service.dart';
+import 'activity_tracking_service.dart';
+import '../models/activity_entry.dart';
 
 class AniListService {
   final AuthService _authService;
   final RateLimiter _rateLimiter;
+  final ActivityTrackingService _activityTracker = ActivityTrackingService();
   GraphQLClient? _client;
   bool _isInitialized = false;
 
@@ -29,6 +33,20 @@ class AniListService {
   // Публичный доступ к AuthService для получения токена
   AuthService get authService => _authService;
 
+  // Публичный доступ к GraphQL client для социальных функций
+  GraphQLClient get client {
+    if (_client == null) {
+      throw Exception('AniList client not initialized. Call _ensureInitialized() first.');
+    }
+    return _client!;
+  }
+
+  /// Public method to ensure the client is initialized
+  /// Can be called externally when needed
+  Future<void> ensureInitialized() async {
+    await _ensureInitialized();
+  }
+
   /// Initialize GraphQL client with access token
   Future<void> _ensureInitialized() async {
     if (_isInitialized && _client != null) {
@@ -46,7 +64,13 @@ class AniListService {
     
     print('✅ Access token found');
     
-    final httpLink = HttpLink(AppConstants.anilistGraphQLUrl);
+    final httpLink = HttpLink(
+      AppConstants.anilistGraphQLUrl,
+      defaultHeaders: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+    );
     
     final authLink = AuthLink(
       getToken: () async => 'Bearer $token',
@@ -340,7 +364,179 @@ class AniListService {
       print('📋 Stack trace: $stackTrace');
       return null;
     }
-  }  /// Update media list entry
+  }
+
+  /// Fetch ALL media lists (anime + manga) in a single optimized query
+  Future<Map<String, List<dynamic>>> fetchAllMediaLists(int userId) async {
+    try {
+      await _ensureInitialized();
+      
+      const query = r'''
+      query($userId: Int) {
+        anime: MediaListCollection(userId: $userId, type: ANIME) {
+          lists {
+            entries {
+              id
+              mediaId
+              status
+              score
+              progress
+              repeat
+              notes
+              customLists
+              startedAt {
+                year
+                month
+                day
+              }
+              completedAt {
+                year
+                month
+                day
+              }
+              updatedAt
+              media {
+                id
+                title {
+                  romaji
+                  english
+                  native
+                }
+                coverImage {
+                  large
+                }
+                bannerImage
+                episodes
+                chapters
+                volumes
+                status
+                format
+                season
+                seasonYear
+                averageScore
+                description
+                isAdult
+                genres
+              }
+            }
+          }
+        }
+        manga: MediaListCollection(userId: $userId, type: MANGA) {
+          lists {
+            entries {
+              id
+              mediaId
+              status
+              score
+              progress
+              progressVolumes
+              repeat
+              notes
+              customLists
+              startedAt {
+                year
+                month
+                day
+              }
+              completedAt {
+                year
+                month
+                day
+              }
+              updatedAt
+              media {
+                id
+                title {
+                  romaji
+                  english
+                  native
+                }
+                coverImage {
+                  large
+                }
+                bannerImage
+                chapters
+                volumes
+                status
+                format
+                averageScore
+                description
+                isAdult
+                genres
+              }
+            }
+          }
+        }
+      }
+      ''';
+
+      print('📡 Sending optimized GraphQL query to fetch all media lists...');
+      
+      final result = await _rateLimiter.execute(() async {
+        return await _client!.query(
+          QueryOptions(
+            document: gql(query),
+            variables: {
+              'userId': userId,
+            },
+          ),
+        );
+      });
+
+      if (result.hasException) {
+        print('❌ Error fetching media lists: ${result.exception}');
+        return {'anime': [], 'manga': []};
+      }
+
+      if (result.data == null) {
+        print('⚠️ No data returned from AniList');
+        return {'anime': [], 'manga': []};
+      }
+
+      // Parse anime list
+      final animeEntries = <dynamic>[];
+      final animeCollection = result.data?['anime'];
+      if (animeCollection != null) {
+        final animeLists = animeCollection['lists'];
+        if (animeLists is List) {
+          for (var list in animeLists) {
+            final entries = list['entries'];
+            if (entries != null && entries is List) {
+              animeEntries.addAll(entries);
+            }
+          }
+        }
+      }
+
+      // Parse manga list
+      final mangaEntries = <dynamic>[];
+      final mangaCollection = result.data?['manga'];
+      if (mangaCollection != null) {
+        final mangaLists = mangaCollection['lists'];
+        if (mangaLists is List) {
+          for (var list in mangaLists) {
+            final entries = list['entries'];
+            if (entries != null && entries is List) {
+              mangaEntries.addAll(entries);
+            }
+          }
+        }
+      }
+
+      print('✅ All media lists fetched: ${animeEntries.length} anime + ${mangaEntries.length} manga = ${animeEntries.length + mangaEntries.length} total entries');
+      
+      return {
+        'anime': animeEntries,
+        'manga': mangaEntries,
+      };
+    } catch (e, stackTrace) {
+      print('❌ Error in fetchAllMediaLists: $e');
+      print('📋 Stack trace: $stackTrace');
+      return {'anime': [], 'manga': []};
+    }
+  }
+
+  /// Update media list entry
   Future<Map<String, dynamic>?> updateMediaListEntry({
     int? entryId, // Nullable for new entries
     int? mediaId, // Required for new entries
@@ -353,6 +549,12 @@ class AniListService {
   }) async {
     try {
       await _ensureInitialized();
+      
+      // Get current entry for activity logging
+      Map<String, dynamic>? oldEntry;
+      if (entryId != null || mediaId != null) {
+        oldEntry = await getMediaListEntry(mediaId ?? 0);
+      }
       
       const mutation = r'''
       mutation(
@@ -383,6 +585,14 @@ class AniListService {
           notes
           customLists
           updatedAt
+          media {
+            id
+            title {
+              romaji
+              english
+            }
+            type
+          }
         }
       }
     ''';
@@ -413,11 +623,160 @@ class AniListService {
       }
 
       print('✅ Media list entry updated');
-      return result.data?['SaveMediaListEntry'];
+      final updatedEntry = result.data?['SaveMediaListEntry'];
+      
+      // Log activity
+      if (updatedEntry != null) {
+        final media = updatedEntry['media'];
+        final mediaTitle = media?['title']?['english'] ?? 
+                          media?['title']?['romaji'] ?? 
+                          'Unknown';
+        final mediaType = media?['type'];
+        final actualMediaId = media?['id'] ?? mediaId;
+        
+        // Determine activity type and details
+        if (oldEntry == null && status != null) {
+          // New entry added
+          await _activityTracker.logActivity(
+            activityType: ActivityEntry.typeAdded,
+            mediaId: actualMediaId!,
+            mediaTitle: mediaTitle,
+            mediaType: mediaType,
+            details: {'status': status},
+          );
+        } else if (progress != null && oldEntry?['progress'] != progress) {
+          // Progress updated
+          await _activityTracker.logActivity(
+            activityType: ActivityEntry.typeProgress,
+            mediaId: actualMediaId!,
+            mediaTitle: mediaTitle,
+            mediaType: mediaType,
+            details: {
+              'oldProgress': oldEntry?['progress'] ?? 0,
+              'newProgress': progress,
+            },
+          );
+        } else if (status != null && oldEntry?['status'] != status) {
+          // Status changed
+          await _activityTracker.logActivity(
+            activityType: ActivityEntry.typeStatus,
+            mediaId: actualMediaId!,
+            mediaTitle: mediaTitle,
+            mediaType: mediaType,
+            details: {
+              'oldStatus': oldEntry?['status'] ?? 'None',
+              'newStatus': status,
+            },
+          );
+        } else if (score != null && oldEntry?['score'] != score) {
+          // Score updated
+          await _activityTracker.logActivity(
+            activityType: ActivityEntry.typeScore,
+            mediaId: actualMediaId!,
+            mediaTitle: mediaTitle,
+            mediaType: mediaType,
+            details: {
+              'oldScore': oldEntry?['score'] ?? 0,
+              'newScore': score,
+            },
+          );
+        } else if (notes != null && oldEntry?['notes'] != notes) {
+          // Notes updated
+          await _activityTracker.logActivity(
+            activityType: ActivityEntry.typeNotes,
+            mediaId: actualMediaId!,
+            mediaTitle: mediaTitle,
+            mediaType: mediaType,
+          );
+        }
+      }
+      
+      return updatedEntry;
     } catch (e, stackTrace) {
       print('❌ Error in updateMediaListEntry: $e');
       print('📋 Stack trace: $stackTrace');
       return null;
+    }
+  }
+
+  /// Получить запись пользователя для конкретного медиа
+  Future<Map<String, dynamic>?> getMediaListEntry(int mediaId) async {
+    try {
+      await _ensureInitialized();
+
+      const query = r'''
+      query($mediaId: Int) {
+        Media(id: $mediaId) {
+          mediaListEntry {
+            id
+            status
+            progress
+            progressVolumes
+            score
+            notes
+            customLists
+          }
+        }
+      }
+      ''';
+
+      final result = await _rateLimiter.execute(() async {
+        return await _client!.query(
+          QueryOptions(
+            document: gql(query),
+            variables: {'mediaId': mediaId},
+            fetchPolicy: FetchPolicy.noCache, // Всегда получаем свежие данные
+          ),
+        );
+      });
+
+      if (result.hasException) {
+        print('❌ Error getting media list entry: ${result.exception}');
+        return null;
+      }
+
+      return result.data?['Media']?['mediaListEntry'];
+    } catch (e) {
+      print('❌ Error in getMediaListEntry: $e');
+      return null;
+    }
+  }
+
+  /// Быстрое увеличение прогресса на 1 эпизод
+  Future<bool> incrementEpisodeProgress(int mediaId) async {
+    try {
+      // Получаем текущую запись пользователя
+      final currentEntry = await getMediaListEntry(mediaId);
+      
+      if (currentEntry == null) {
+        print('⚠️ No media list entry found, creating new one');
+        // Создаем новую запись со статусом CURRENT и прогрессом 1
+        final result = await updateMediaListEntry(
+          mediaId: mediaId,
+          status: 'CURRENT',
+          progress: 1,
+        );
+        return result != null;
+      }
+
+      final currentProgress = currentEntry['progress'] as int? ?? 0;
+      final newProgress = currentProgress + 1;
+
+      // Обновляем прогресс
+      final result = await updateMediaListEntry(
+        entryId: currentEntry['id'] as int,
+        progress: newProgress,
+      );
+
+      if (result != null) {
+        print('✅ Episode progress incremented to $newProgress');
+        return true;
+      }
+      
+      return false;
+    } catch (e) {
+      print('❌ Error in incrementEpisodeProgress: $e');
+      return false;
     }
   }
 
@@ -579,6 +938,7 @@ class AniListService {
             synonyms
             duration
             description(asHtml: false)
+            isAdult
           }
         }
       }
@@ -1423,6 +1783,388 @@ class AniListService {
     } catch (e) {
       print('Error in advancedSearch: $e');
       return [];
+    }
+  }
+
+  /// Import activity history from AniList
+  /// Fetches user's list updates for the past [days] and logs them to local activity tracker
+  Future<int> importActivityHistory({int days = 30}) async {
+    try {
+      await _ensureInitialized();
+      
+      print('📥 Importing activity history from AniList (last $days days)...');
+      
+      // Get user ID
+      final userData = await fetchCurrentUser();
+      if (userData == null) {
+        print('❌ Could not fetch user data');
+        return 0;
+      }
+      
+      print('📋 User data received: ${userData.keys}');
+      final userId = userData['id'];
+      if (userId == null) {
+        print('❌ User ID not found in data: $userData');
+        return 0;
+      }
+      
+      print('✅ User ID: $userId');
+      
+      // Calculate timestamp for filtering (X days ago)
+      final sinceTimestamp = DateTime.now()
+          .subtract(Duration(days: days))
+          .millisecondsSinceEpoch ~/ 1000;
+      
+      // Query for list activity
+      const query = r'''
+        query($userId: Int, $page: Int, $perPage: Int, $createdAt_greater: Int) {
+          Page(page: $page, perPage: $perPage) {
+            activities(userId: $userId, type: MEDIA_LIST, createdAt_greater: $createdAt_greater, sort: ID_DESC) {
+              ... on ListActivity {
+                id
+                createdAt
+                status
+                progress
+                media {
+                  id
+                  title {
+                    romaji
+                    english
+                  }
+                  type
+                  format
+                }
+              }
+            }
+            pageInfo {
+              hasNextPage
+              currentPage
+            }
+          }
+        }
+      ''';
+      
+      int importedCount = 0;
+      int currentPage = 1;
+      bool hasNextPage = true;
+      
+      while (hasNextPage && currentPage <= 5) { // Limit to 5 pages (500 activities max)
+        print('📄 Fetching page $currentPage...');
+        
+        final result = await _rateLimiter.execute(() async {
+          return await _client!.query(
+            QueryOptions(
+              document: gql(query),
+              variables: {
+                'userId': userId,
+                'page': currentPage,
+                'perPage': 100,
+                'createdAt_greater': sinceTimestamp,
+              },
+            ),
+          );
+        });
+        
+        if (result.hasException) {
+          print('⚠️ Error fetching page $currentPage: ${result.exception}');
+          break;
+        }
+        
+        final activities = result.data?['Page']?['activities'] as List<dynamic>?;
+        if (activities == null || activities.isEmpty) {
+          print('📭 No more activities found');
+          break;
+        }
+        
+        // Process activities
+        for (final activity in activities) {
+          try {
+            final mediaId = activity['media']?['id'];
+            final mediaTitle = activity['media']?['title']?['romaji'] ?? 
+                              activity['media']?['title']?['english'] ?? 
+                              'Unknown';
+            final mediaType = activity['media']?['type'] ?? 'ANIME';
+            final status = activity['status'];
+            final progress = activity['progress'];
+            final createdAt = activity['createdAt'];
+            
+            if (mediaId == null || createdAt == null) continue;
+            
+            // Determine activity type based on status and progress
+            String activityType = 'list_update';
+            Map<String, dynamic>? activityDetails;
+            
+            if (status != null) {
+              activityType = 'status_change';
+              activityDetails = {'status': status};
+            } else if (progress != null) {
+              activityType = 'progress_update';
+              activityDetails = {'progress': progress};
+            }
+            
+            // Create activity entry with original timestamp
+            final timestamp = DateTime.fromMillisecondsSinceEpoch(createdAt * 1000);
+            
+            // Create entry directly and add to box
+            final entry = ActivityEntry(
+              id: createdAt * 1000, // Use AniList timestamp as unique ID
+              timestamp: timestamp,
+              activityType: activityType,
+              mediaId: mediaId,
+              mediaTitle: mediaTitle,
+              mediaType: mediaType,
+              details: activityDetails,
+            );
+            
+            // Add to activity tracker's box
+            await _activityTracker.init();
+            final box = _activityTracker.getBox();
+            if (box != null) {
+              await box.add(entry);
+            }
+            
+            importedCount++;
+          } catch (e) {
+            print('⚠️ Error processing activity: $e');
+          }
+        }
+        
+        // Check for next page
+        final pageInfo = result.data?['Page']?['pageInfo'];
+        hasNextPage = pageInfo?['hasNextPage'] ?? false;
+        currentPage++;
+        
+        print('✅ Imported ${activities.length} activities from page ${currentPage - 1}');
+      }
+      
+      print('✅ Activity import complete: $importedCount activities imported');
+      return importedCount;
+      
+    } catch (e) {
+      print('❌ Error importing activity history: $e');
+      return 0;
+    }
+  }
+
+  /// Fetch extended media statistics (studios, staff, voice actors) for user's list
+  /// This is optimized for statistics page - only fetches necessary fields
+  Future<Map<String, dynamic>> fetchMediaStatisticsDetails(int userId) async {
+    try {
+      await _ensureInitialized();
+      
+      print('📊 Fetching extended statistics data (studios, staff, VA)...');
+      
+      const query = r'''
+        query($userId: Int) {
+          MediaListCollection(userId: $userId, type: ANIME) {
+            lists {
+              entries {
+                mediaId
+                media {
+                  id
+                  studios(isMain: true) {
+                    nodes {
+                      id
+                      name
+                    }
+                  }
+                  characters(perPage: 10, sort: ROLE) {
+                    edges {
+                      role
+                      node {
+                        id
+                        name {
+                          full
+                        }
+                        image {
+                          large
+                        }
+                      }
+                      voiceActors(language: JAPANESE, sort: FAVOURITES_DESC) {
+                        id
+                        name {
+                          full
+                        }
+                        image {
+                          large
+                        }
+                      }
+                    }
+                  }
+                  staff(perPage: 10, sort: RELEVANCE) {
+                    edges {
+                      role
+                      node {
+                        id
+                        name {
+                          full
+                        }
+                        image {
+                          large
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ''';
+      
+      // Add timeout to prevent indefinite waiting
+      final result = await _rateLimiter.execute(() async {
+        return await _client!.query(
+          QueryOptions(
+            document: gql(query),
+            variables: {'userId': userId},
+            fetchPolicy: FetchPolicy.networkOnly,
+          ),
+        );
+      }).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw TimeoutException('GraphQL request timed out after 30 seconds');
+        },
+      );
+      
+      if (result.hasException) {
+        print('❌ Error fetching statistics details: ${result.exception}');
+        return {};
+      }
+      
+      if (result.data == null) {
+        print('⚠️ No data returned');
+        return {};
+      }
+      
+      // Parse data
+      final collection = result.data?['MediaListCollection'];
+      if (collection == null) {
+        return {};
+      }
+      
+      final studios = <String, int>{};
+      final voiceActors = <String, Map<String, dynamic>>{};
+      final staff = <String, Map<String, dynamic>>{};
+      
+      final lists = collection['lists'] as List<dynamic>?;
+      if (lists != null) {
+        for (final list in lists) {
+          final entries = list['entries'] as List<dynamic>?;
+          if (entries != null) {
+            for (final entry in entries) {
+              final media = entry['media'];
+              if (media == null) continue;
+              
+              final mediaId = media['id'];
+              
+              // Process studios
+              final studiosData = media['studios']?['nodes'] as List<dynamic>?;
+              if (studiosData != null) {
+                for (final studio in studiosData) {
+                  final name = studio['name'] as String?;
+                  if (name != null) {
+                    studios[name] = (studios[name] ?? 0) + 1;
+                  }
+                }
+              }
+              
+              // Process voice actors
+              final characters = media['characters']?['edges'] as List<dynamic>?;
+              if (characters != null) {
+                for (final charEdge in characters) {
+                  final role = charEdge['role'] as String?;
+                  final character = charEdge['node'];
+                  final vas = charEdge['voiceActors'] as List<dynamic>?;
+                  
+                  if (vas != null && character != null) {
+                    for (final va in vas) {
+                      final vaId = va['id'].toString();
+                      final vaName = va['name']?['full'] as String?;
+                      final vaImage = va['image']?['large'] as String?;
+                      
+                      if (vaName != null) {
+                        if (!voiceActors.containsKey(vaId)) {
+                          voiceActors[vaId] = {
+                            'id': va['id'],
+                            'name': vaName,
+                            'image': vaImage,
+                            'animeCount': 0,
+                            'characters': <Map<String, dynamic>>[],
+                          };
+                        }
+                        
+                        voiceActors[vaId]!['animeCount'] = (voiceActors[vaId]!['animeCount'] as int) + 1;
+                        (voiceActors[vaId]!['characters'] as List).add({
+                          'id': character['id'],
+                          'name': character['name']?['full'],
+                          'image': character['image']?['large'],
+                          'role': role,
+                          'mediaId': mediaId,
+                        });
+                      }
+                    }
+                  }
+                }
+              }
+              
+              // Process staff
+              final staffData = media['staff']?['edges'] as List<dynamic>?;
+              if (staffData != null) {
+                for (final staffEdge in staffData) {
+                  final role = staffEdge['role'] as String?;
+                  final staffNode = staffEdge['node'];
+                  
+                  if (staffNode != null) {
+                    final staffId = staffNode['id'].toString();
+                    final staffName = staffNode['name']?['full'] as String?;
+                    final staffImage = staffNode['image']?['large'] as String?;
+                    
+                    if (staffName != null) {
+                      if (!staff.containsKey(staffId)) {
+                        staff[staffId] = {
+                          'id': staffNode['id'],
+                          'name': staffName,
+                          'image': staffImage,
+                          'animeCount': 0,
+                          'roles': <String, int>{},
+                          'anime': <Map<String, dynamic>>[],
+                        };
+                      }
+                      
+                      staff[staffId]!['animeCount'] = (staff[staffId]!['animeCount'] as int) + 1;
+                      
+                      if (role != null) {
+                        final roles = staff[staffId]!['roles'] as Map<String, int>;
+                        roles[role] = (roles[role] ?? 0) + 1;
+                      }
+                      
+                      (staff[staffId]!['anime'] as List).add({
+                        'mediaId': mediaId,
+                        'role': role,
+                      });
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      print('✅ Statistics details fetched: ${studios.length} studios, ${voiceActors.length} VAs, ${staff.length} staff');
+      
+      return {
+        'studios': studios,
+        'voiceActors': voiceActors.values.toList(),
+        'staff': staff.values.toList(),
+      };
+      
+    } catch (e, stackTrace) {
+      print('❌ Error in fetchMediaStatisticsDetails: $e');
+      print('📋 Stack trace: $stackTrace');
+      return {};
     }
   }
 }

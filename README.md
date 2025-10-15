@@ -7,10 +7,10 @@ A modern, manga-styled AniList client for Windows and Android, built with Flutte
 
 ![Flutter](https://img.shields.io/badge/Flutter-3.9.2-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Android-green)
-[![Version](https://img.shields.io/badge/Version-v1.5.0--dev-orange)](https://github.com/Baconana-chan/miyolist-public/releases)
+[![Version](https://img.shields.io/badge/Version-v1.5.0--dev-orange)](https://github.com/Baconana-chan/miyolist/releases)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-[**🌐 Website**](https://miyo.my) • [**📦 Download**](https://github.com/Baconana-chan/miyolist-public/releases) • [**📚 Docs**](docs/) • [**🐛 Report Bug**](https://github.com/Baconana-chan/miyolist-public/issues)
+[**🌐 Website**](https://miyo.my) • [**📦 Download**](https://github.com/Baconana-chan/miyolist/releases) • [**📚 Docs**](docs/) • [**🐛 Report Bug**](https://github.com/Baconana-chan/miyolist/issues)
 </div>
 
 ---
@@ -85,7 +85,7 @@ MiyoList is an **unofficial AniList client** that elevates your anime and manga 
 - **iOS/macOS**: Coming in future versions.
 
 ### Quick Start
-1. Download the appropriate version from [GitHub Releases](https://github.com/Baconana-chan/miyolist-public/releases).
+1. Download the appropriate version from [GitHub Releases](https://github.com/Baconana-chan/miyolist/releases).
 2. Install and launch MiyoList.
 3. Sign in with your AniList account (OAuth2).
 4. Choose privacy profile (Private or Public).
@@ -102,16 +102,12 @@ MiyoList is an **unofficial AniList client** that elevates your anime and manga 
 - An AniList account.
 - A Supabase project (optional, for cloud sync).
 
-> **🔐 SECURITY NOTE**: This repository does NOT contain API credentials.  
-> You must set up your own credentials before running the app.  
-> See [SETUP_CREDENTIALS.md](SETUP_CREDENTIALS.md) for step-by-step instructions.
-
 ### Setup Instructions
 
 1. **Clone the Repository**
    ```bash
-   git clone https://github.com/Baconana-chan/miyolist-public.git
-   cd miyolist-public
+   git clone https://github.com/Baconana-chan/miyolist.git
+   cd miyolist
    ```
 
 2. **Install Dependencies**
@@ -119,17 +115,19 @@ MiyoList is an **unofficial AniList client** that elevates your anime and manga 
    flutter pub get
    ```
 
-3. **Configure Credentials** 
-   
-   Copy the example configuration file:
-   ```bash
-   cp lib/core/constants/app_constants.dart.example lib/core/constants/app_constants.dart
-   ```
-   
-   Then follow the detailed setup guide in [SETUP_CREDENTIALS.md](SETUP_CREDENTIALS.md) to:
-   - Get your AniList Client ID & Secret
-   - (Optional) Set up Supabase for cloud sync
-   - Configure the `app_constants.dart` file
+3. **Configure AniList OAuth2**
+   - Go to [AniList Settings - Developers](https://anilist.co/settings/developer).
+   - Create a new API Client with:
+     - **Name**: MiyoList (or your preferred name).
+     - **Redirect URL**:
+       - Android: `miyolist://auth`
+       - Windows: `miyolist://auth` (requires custom URL scheme registration)
+       - Development: `http://localhost:8080/auth`
+   - Copy your **Client ID**.
+   - Open `lib/core/constants/app_constants.dart` and replace:
+     ```dart
+     static const String anilistClientId = 'YOUR_CLIENT_ID_HERE';
+     ```
 
 4. **Configure Android Deep Linking**
    Verify `android/app/src/main/AndroidManifest.xml` contains:
@@ -414,7 +412,7 @@ We're transparent about our current state while actively working to become the b
 ## 🤝 Contributing
 
 Contributions are welcome! Here's how you can help:
-- 🐛 **Report Bugs**: [Open an issue](https://github.com/Baconana-chan/miyolist-public/issues).
+- 🐛 **Report Bugs**: [Open an issue](https://github.com/Baconana-chan/miyolist/issues).
 - 💡 **Suggest Features**: Share your ideas.
 - 🔧 **Submit PRs**: Code contributions appreciated.
 - 📖 **Improve Docs**: Help others get started.
@@ -437,8 +435,8 @@ MiyoList is an **unofficial** third-party client and is **not affiliated with An
 ## 💖 Support
 
 - 🌐 **Website**: [miyo.my](https://miyo.my)
-- 📦 **Releases**: [GitHub Releases](https://github.com/Baconana-chan/miyolist-public/releases)
-- 🐛 **Issues**: [GitHub Issues](https://github.com/Baconana-chan/miyolist-public/issues)
+- 📦 **Releases**: [GitHub Releases](https://github.com/Baconana-chan/miyolist/releases)
+- 🐛 **Issues**: [GitHub Issues](https://github.com/Baconana-chan/miyolist/issues)
 - 📧 **Contact**: Open an issue for support
 
 ---

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../../core/services/auth_service.dart';
 import '../../../../core/services/local_storage_service.dart';
 import '../../../../core/services/supabase_service.dart';
@@ -6,7 +8,7 @@ import '../../../../core/services/anilist_service.dart';
 import '../../../../core/models/user_model.dart';
 import '../../../../core/models/media_list_entry.dart';
 import '../../../../core/models/user_settings.dart';
-import '../../../anime_list/presentation/pages/anime_list_page.dart';
+import '../../../main/presentation/pages/main_page.dart';
 import 'profile_type_selection_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -27,45 +29,394 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
+  String? _errorMessage;
 
   Future<void> _handleLogin() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     try {
-      // Authenticate with AniList
-      final accessToken = await widget.authService.authenticateWithAniList();
+      // Try to open browser - don't block if it fails
+      try {
+        await _openAuthBrowser();
+      } catch (browserError) {
+        print('⚠️ Could not open browser automatically: $browserError');
+        // Show a helpful message but continue to manual entry
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text(
+                'Browser didn\'t open? No problem! Manually visit:\nhttps://miyo.my/auth/login',
+              ),
+              duration: const Duration(seconds: 5),
+              action: SnackBarAction(
+                label: 'Copy Link',
+                onPressed: () {
+                  Clipboard.setData(const ClipboardData(text: 'https://miyo.my/auth/login'));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Link copied to clipboard!'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+            ),
+          );
+        }
+      }
       
-      if (accessToken == null) {
+      // Show manual code entry dialog
+      if (mounted) {
         setState(() => _isLoading = false);
-        _showError('Authentication failed');
+        await _handleManualCodeEntry();
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Authentication error: $e';
+        _isLoading = false;
+      });
+    }
+  }
+  
+  Future<void> _openAuthBrowser() async {
+    final webAuthUrl = Uri.parse('https://miyo.my/auth/login');
+    if (await canLaunchUrl(webAuthUrl)) {
+      await launchUrl(
+        webAuthUrl,
+        mode: LaunchMode.externalApplication,
+      );
+    } else {
+      throw Exception('Could not launch auth URL');
+    }
+  }
+
+  Future<void> _handleManualCodeEntry() async {
+    final code = await _showManualCodeDialog();
+    
+    if (code != null && code.isNotEmpty && mounted) {
+      setState(() => _isLoading = true);
+      
+      try {
+        final accessToken = await widget.authService.authenticateWithManualCode(code);
+        
+        if (accessToken == null) {
+          setState(() {
+            _errorMessage = 'Failed to exchange code for token';
+            _isLoading = false;
+          });
+          return;
+        }
+        
+        await _continueWithAuth();
+      } catch (e) {
+        setState(() {
+          _errorMessage = 'Manual authentication failed: $e';
+          _isLoading = false;
+        });
+      }
+    } else {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<String?> _showManualCodeDialog() async {
+    final codeController = TextEditingController();
+    
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(Icons.vpn_key, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 12),
+            const Text('Enter Authorization Code'),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.info_outline,
+                          size: 20,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'How to get the authorization code:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildStepRow('1', 'A browser will open to https://miyo.my/auth/login'),
+                    const SizedBox(height: 6),
+                    _buildStepRow('2', 'Click "Authorize" on AniList'),
+                    const SizedBox(height: 6),
+                    _buildStepRow('3', 'After authorization, you\'ll be redirected to https://miyo.my/auth/callback'),
+                    const SizedBox(height: 6),
+                    _buildStepRow('4', 'Copy the entire callback URL or just the code from the page'),
+                    const SizedBox(height: 6),
+                    _buildStepRow('5', 'Paste it below - the app will automatically extract your code'),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.orange.withOpacity(0.4)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.lightbulb_outline, size: 16, color: Colors.orange),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: RichText(
+                              text: TextSpan(
+                                style: const TextStyle(
+                                  fontSize: 12, 
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                children: [
+                                  const TextSpan(text: 'The callback page is on '),
+                                  TextSpan(
+                                    text: 'miyo.my',
+                                    style: TextStyle(
+                                      color: Colors.orange,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const TextSpan(text: '. You can paste either the full URL or just the code!'),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.help_outline, size: 18, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Browser didn\'t open?',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.blue.shade200,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        final url = Uri.parse('https://miyo.my/auth/login');
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url, mode: LaunchMode.externalApplication);
+                        } else {
+                          Clipboard.setData(const ClipboardData(text: 'https://miyo.my/auth/login'));
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Link copied! Open it manually in your browser'),
+                              ),
+                            );
+                          }
+                        }
+                      },
+                      style: TextButton.styleFrom(
+                        backgroundColor: Colors.blue.withOpacity(0.2),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      ),
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.open_in_new, size: 14, color: Colors.blue),
+                          SizedBox(width: 4),
+                          Text(
+                            'Open Login Page',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.blue,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: codeController,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Authorization Code',
+                  hintText: 'Paste your code here...',
+                  border: const OutlineInputBorder(),
+                  prefixIcon: const Icon(Icons.code),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.content_paste),
+                    onPressed: () async {
+                      final data = await Clipboard.getData(Clipboard.kTextPlain);
+                      if (data?.text != null) {
+                        String code = data!.text!.trim();
+                        // Remove URL prefix if user pasted full callback URL
+                        if (code.contains('miyo.my/auth/callback?code=')) {
+                          code = code.split('code=').last.split('&').first;
+                        } else if (code.startsWith('http')) {
+                          // Handle any URL format
+                          try {
+                            final uri = Uri.parse(code);
+                            code = uri.queryParameters['code'] ?? code;
+                          } catch (_) {
+                            // If parsing fails, use as is
+                          }
+                        }
+                        codeController.text = code;
+                      }
+                    },
+                    tooltip: 'Paste from clipboard',
+                  ),
+                ),
+                maxLines: 3,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) {
+                  final code = codeController.text.trim();
+                  if (code.isNotEmpty) {
+                    Navigator.pop(context, code);
+                  }
+                },
+                onChanged: (value) {
+                  // Auto-clean URL if user types/pastes directly
+                  if (value.contains('miyo.my/auth/callback?code=')) {
+                    final cleaned = value.split('code=').last.split('&').first;
+                    if (cleaned != value) {
+                      codeController.text = cleaned;
+                      codeController.selection = TextSelection.fromPosition(
+                        TextPosition(offset: cleaned.length),
+                      );
+                    }
+                  } else if (value.startsWith('http')) {
+                    try {
+                      final uri = Uri.parse(value);
+                      final code = uri.queryParameters['code'];
+                      if (code != null && code != value) {
+                        codeController.text = code;
+                        codeController.selection = TextSelection.fromPosition(
+                          TextPosition(offset: code.length),
+                        );
+                      }
+                    } catch (_) {}
+                  }
+                },
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () async {
+                  // Re-open browser
+                  final webAuthUrl = Uri.parse('https://miyo.my/auth/login');
+                  if (await canLaunchUrl(webAuthUrl)) {
+                    await launchUrl(
+                      webAuthUrl,
+                      mode: LaunchMode.externalApplication,
+                    );
+                  }
+                },
+                icon: const Icon(Icons.open_in_new),
+                label: const Text('Open Browser Again'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(double.infinity, 44),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () {
+              final code = codeController.text.trim();
+              if (code.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter the authorization code'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(context, code);
+            },
+            icon: const Icon(Icons.check),
+            label: const Text('Submit'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _continueWithAuth() async {
+    if (!mounted) return;
+    
+    try {
+      // Show profile type selection
+      final settings = await Navigator.of(context).push<UserSettings>(
+        MaterialPageRoute(
+          builder: (_) => const ProfileTypeSelectionPage(),
+        ),
+      );
+
+      if (settings == null) {
+        setState(() => _isLoading = false);
         return;
       }
 
-      // Show profile type selection
-      if (mounted) {
-        final settings = await Navigator.of(context).push<UserSettings>(
-          MaterialPageRoute(
-            builder: (_) => const ProfileTypeSelectionPage(),
-          ),
-        );
+      // Save privacy settings
+      await widget.localStorageService.saveUserSettings(settings);
 
-        if (settings == null) {
-          setState(() => _isLoading = false);
-          return;
-        }
-
-        // Save privacy settings
-        await widget.localStorageService.saveUserSettings(settings);
-
-        // Continue with data sync
-        await _syncUserData(settings);
-      }
+      // Continue with data sync
+      await _syncUserData(settings);
     } catch (e) {
-      _showError('Login failed: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      setState(() {
+        _errorMessage = 'Failed to continue: $e';
+        _isLoading = false;
+      });
     }
   }
 
@@ -105,12 +456,15 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
 
-      // Fetch and save anime list
-      print('📺 Fetching anime list from AniList...');
-      final animeListData = await anilistService.fetchAnimeList(user.id);
+      // Fetch all media lists in a single optimized query
+      print('� Fetching all media lists from AniList (anime + manga)...');
+      final allMediaLists = await anilistService.fetchAllMediaLists(user.id);
+      
+      // Process anime list
+      final animeListData = allMediaLists['anime'];
       print('📺 Anime list received: ${animeListData?.length ?? 0} entries');
       
-      if (animeListData != null) {
+      if (animeListData != null && animeListData.isNotEmpty) {
         final animeList = animeListData
             .map((e) => MediaListEntry.fromJson(e))
             .toList();
@@ -136,12 +490,11 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
 
-      // Fetch and save manga list
-      print('📚 Fetching manga list from AniList...');
-      final mangaListData = await anilistService.fetchMangaList(user.id);
+      // Process manga list
+      final mangaListData = allMediaLists['manga'];
       print('📚 Manga list received: ${mangaListData?.length ?? 0} entries');
       
-      if (mangaListData != null) {
+      if (mangaListData != null && mangaListData.isNotEmpty) {
         final mangaList = mangaListData
             .map((e) => MediaListEntry.fromJson(e))
             .toList();
@@ -209,7 +562,7 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (_) => AnimeListPage(
+            builder: (_) => MainPage(
               authService: widget.authService,
               localStorageService: widget.localStorageService,
               supabaseService: widget.supabaseService,
@@ -300,6 +653,31 @@ class _LoginPageState extends State<LoginPage> {
                 
                 const SizedBox(height: 48),
                 
+                // Error message
+                if (_errorMessage != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.1),
+                      border: Border.all(color: Colors.red, width: 2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline, color: Colors.red),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _errorMessage!,
+                            style: const TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                
                 // Login button
                 SizedBox(
                   width: double.infinity,
@@ -331,6 +709,44 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
                 
+                const SizedBox(height: 12),
+                
+                // Manual code entry button
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: OutlinedButton(
+                    onPressed: _isLoading ? null : _handleManualCodeEntry,
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(
+                        color: Theme.of(context).colorScheme.primary,
+                        width: 2,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.vpn_key,
+                          size: 20,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Enter Code Manually',
+                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: Theme.of(context).colorScheme.primary,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                
                 const SizedBox(height: 24),
                 
                 // Info text
@@ -346,6 +762,46 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
       ),
+    );
+  }
+
+  /// Helper method to build instruction step rows
+  Widget _buildStepRow(String number, String text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary,
+            shape: BoxShape.circle,
+          ),
+          child: Center(
+            child: Text(
+              number,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

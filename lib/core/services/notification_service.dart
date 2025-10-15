@@ -249,6 +249,23 @@ class NotificationService {
                 }
               }
             }
+            ... on ThreadLikeNotification {
+              id
+              type
+              context
+              createdAt
+              thread {
+                id
+                title
+              }
+              user {
+                id
+                name
+                avatar {
+                  large
+                }
+              }
+            }
             ... on RelatedMediaAdditionNotification {
               id
               type

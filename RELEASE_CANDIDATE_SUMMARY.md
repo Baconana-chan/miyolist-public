@@ -212,8 +212,8 @@ Starting with v1.0.0, MiyoList adopts **named versions** with Japanese names:
 ## 🌐 Links
 
 - **Website:** [miyo.my](https://miyo.my)
-- **GitHub:** [Baconana-chan/miyolist-public](https://github.com/Baconana-chan/miyolist-public)
-- **Releases:** [GitHub Releases](https://github.com/Baconana-chan/miyolist-public/releases)
+- **GitHub:** [Baconana-chan/miyolist](https://github.com/Baconana-chan/miyolist)
+- **Releases:** [GitHub Releases](https://github.com/Baconana-chan/miyolist/releases)
 - **Documentation:** [docs/](docs/)
 
 ---

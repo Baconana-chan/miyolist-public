@@ -36,6 +36,7 @@ class _PrivacySettingsDialogState extends State<PrivacySettingsDialog> {
   late bool _showMangaTab;
   late bool _showNovelTab;
   late AppThemeMode _selectedTheme;
+  late bool _hideAdultContent;
   bool _isLoading = false;
   Map<String, dynamic>? _dbStats;
 
@@ -54,6 +55,7 @@ class _PrivacySettingsDialogState extends State<PrivacySettingsDialog> {
     _showMangaTab = widget.currentSettings.showMangaTab;
     _showNovelTab = widget.currentSettings.showNovelTab;
     _selectedTheme = AppThemeMode.fromValue(widget.currentSettings.themeMode);
+    _hideAdultContent = widget.currentSettings.hideAdultContent;
     _loadDatabaseStats();
   }
 
@@ -109,6 +111,7 @@ class _PrivacySettingsDialogState extends State<PrivacySettingsDialog> {
         showMangaTab: _showMangaTab,
         showNovelTab: _showNovelTab,
         themeMode: _selectedTheme.value,
+        hideAdultContent: _hideAdultContent,
         updatedAt: DateTime.now(),
       );
 
@@ -571,6 +574,68 @@ class _PrivacySettingsDialogState extends State<PrivacySettingsDialog> {
                         'At least one tab must be visible',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: AppTheme.accentRed,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            
+            const Divider(height: 32),
+            
+            // Content Settings
+            Text(
+              'Content Filtering',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 4),
+              child: Text(
+                'Control what content is visible throughout the app',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppTheme.textGray,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            
+            SwitchListTile(
+              title: const Text('Hide Adult Content'),
+              subtitle: const Text('Hide 18+ content throughout the entire app (overrides AniList settings)'),
+              value: _hideAdultContent,
+              onChanged: (value) => setState(() => _hideAdultContent = value),
+              activeColor: AppTheme.accentBlue,
+              secondary: const Icon(Icons.shield_outlined, size: 20),
+              dense: true,
+            ),
+            
+            if (_hideAdultContent)
+              Container(
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.accentBlue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: AppTheme.accentBlue.withOpacity(0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      color: AppTheme.accentBlue,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Adult content will be hidden in all lists, search results, and recommendations. This setting overrides your AniList 18+ content preference.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: AppTheme.accentBlue,
                         ),
                       ),
                     ),
