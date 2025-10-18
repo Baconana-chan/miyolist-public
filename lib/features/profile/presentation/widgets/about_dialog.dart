@@ -44,7 +44,7 @@ class AboutAppDialog extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Version v1.0.1 "Aoi (葵)"',
+              'Version v1.1.0 "Botan (牡丹)"',
               style: TextStyle(
                 fontSize: 14,
                 color: AppTheme.textGray,
@@ -66,18 +66,62 @@ class AboutAppDialog extends StatelessWidget {
 
                     const SizedBox(height: 24),
 
-                    // What's New in v1.0.0 "Aoi (葵)"
+                    // What's New in v1.1.0 "Botan (牡丹)"
                     _buildSection(
-                      title: '🎉 What\'s New in v1.0.0 "Aoi (葵)"',
+                      title: '� What\'s New in v1.1.0 "Botan (牡丹)"',
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _buildFeatureItem(
-                            '📺 Activity Feed & Airing Schedule',
+                            '� Social Features - Following System',
+                            'Follow other users, view their public profiles, stats, and favorites. Browse Following/Followers lists, see activity feed from people you follow, and check who\'s watching the same anime!',
+                          ),
+                          _buildFeatureItem(
+                            '🤝 Friend System',
+                            'Mutual follow detection with 3-tab interface: Friends (mutual), Requests (incoming), and Pending (outgoing). Accept friend requests and manage connections easily!',
+                          ),
+                          _buildFeatureItem(
+                            '� Activity Interactions',
+                            'Like and reply to activities from following users. Post your own text activities with Markdown formatting. See AniList Guidelines link to avoid violations!',
+                          ),
+                          _buildFeatureItem(
+                            '🎖️ Donator Badges',
+                            '4-tier badge system with animated rainbow effect for tier 4 supporters. Badges appear in profiles, activity feeds, and friend lists.',
+                          ),
+                          _buildFeatureItem(
+                            '� Offline Content Settings',
+                            'Full control over what to cache: Lists, Favorites, Characters, Staff, Banners, Trending, Search. Choose your offline priorities and save storage!',
+                          ),
+                          _buildFeatureItem(
+                            '☕ Java 17 Upgrade',
+                            'Updated Android build to Java 17 (LTS until 2029). No more Java 8 warnings, better performance, and faster release builds!',
+                          ),
+                          _buildFeatureItem(
+                            '� Push Notifications (Enhanced)',
+                            'Windows desktop notifications for airing episodes, interactive actions (Mark Watched, Snooze, Add to Planning), and smart timing control.',
+                          ),
+                          _buildFeatureItem(
+                            '🐛 Bug Fixes',
+                            'Fixed zonedSchedule on Windows, reduced API requests on startup, improved AniList client initialization, and better error handling.',
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // What's New in v1.0.0 "Aoi (葵)"
+                    _buildSection(
+                      title: '🎉 Previous Release - v1.0.0 "Aoi (葵)"',
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _buildFeatureItem(
+                            '� Activity Feed & Airing Schedule',
                             'Stay up-to-date with today\'s releases, upcoming episodes, and real-time countdown timers. Auto-refreshes every minute!',
                           ),
                           _buildFeatureItem(
-                            '🔍 Advanced Global Search',
+                            '� Advanced Global Search',
                             'Search across anime, manga, characters, staff, and studios with powerful filters including adult content toggle, format filters, and genre selection.',
                           ),
                           _buildFeatureItem(
@@ -85,32 +129,16 @@ class AboutAppDialog extends StatelessWidget {
                             'Full control over your profile visibility with public/private mode, custom tab visibility, and granular sync settings.',
                           ),
                           _buildFeatureItem(
-                            '📊 Statistics & Analytics',
+                            '� Statistics & Analytics',
                             'Comprehensive stats tracking: watch time, episode counts, genre distribution, format breakdown, score analytics, and completion rates.',
                           ),
                           _buildFeatureItem(
-                            '🐛 Crash Reporting System',
+                            '� Crash Reporting System',
                             'Automatic crash detection with detailed logs, privacy-focused reporting, and session tracking for improved stability.',
                           ),
                           _buildFeatureItem(
-                            '🔄 App Update System',
+                            '� App Update System',
                             'Automatic update checks, changelog display, download links, reminder intervals, and manual check support via GitHub releases.',
-                          ),
-                          _buildFeatureItem(
-                            '🎨 Theme Customization',
-                            'Dark theme with customizable view modes (grid/list/compact) for anime, manga, and light novels.',
-                          ),
-                          _buildFeatureItem(
-                            '💾 Image Cache Management',
-                            'Smart image caching with size limits, auto-cleanup, and manual cache management up to 2GB.',
-                          ),
-                          _buildFeatureItem(
-                            '🔗 Rich Text Support',
-                            'Markdown rendering with clickable AniList links (anime, manga, characters, users) and external URL support.',
-                          ),
-                          _buildFeatureItem(
-                            '📱 Status Filtering',
-                            'Smart filter badges showing counts for each status (Watching, Completed, Planning, etc.) including ALL items.',
                           ),
                         ],
                       ),

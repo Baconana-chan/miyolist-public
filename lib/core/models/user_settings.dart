@@ -73,6 +73,27 @@ class UserSettings extends HiveObject {
   @HiveField(22)
   final String? exportPath; // Кастомный путь для экспорта изображений (null = использовать папку приложения)
 
+  @HiveField(23)
+  final bool cacheListCovers; // Кэшировать обложки из списков (anime/manga)
+
+  @HiveField(24)
+  final bool cacheFavoriteCovers; // Кэшировать обложки избранного
+
+  @HiveField(25)
+  final bool cacheCharacterImages; // Кэшировать изображения персонажей
+
+  @HiveField(26)
+  final bool cacheStaffImages; // Кэшировать изображения staff
+
+  @HiveField(27)
+  final bool cacheBannerImages; // Кэшировать баннеры
+
+  @HiveField(28)
+  final bool cacheTrendingCovers; // Кэшировать обложки из trending
+
+  @HiveField(29)
+  final bool cacheSearchResults; // Кэшировать результаты поиска
+
   UserSettings({
     required this.isPublicProfile,
     required this.enableCloudSync,
@@ -97,6 +118,13 @@ class UserSettings extends HiveObject {
     this.updateReminderIntervalDays = 7, // По умолчанию напоминать раз в неделю
     this.hideAdultContent = false, // По умолчанию не скрывать (будет определяться из настроек AniList)
     this.exportPath, // null = папка приложения по умолчанию
+    this.cacheListCovers = true, // По умолчанию кэшировать обложки списков
+    this.cacheFavoriteCovers = true, // По умолчанию кэшировать избранное
+    this.cacheCharacterImages = false, // По умолчанию НЕ кэшировать персонажей
+    this.cacheStaffImages = false, // По умолчанию НЕ кэшировать staff
+    this.cacheBannerImages = false, // По умолчанию НЕ кэшировать баннеры
+    this.cacheTrendingCovers = false, // По умолчанию НЕ кэшировать trending
+    this.cacheSearchResults = false, // По умолчанию НЕ кэшировать поиск
   });
 
   factory UserSettings.defaultPrivate() {
@@ -123,6 +151,13 @@ class UserSettings extends HiveObject {
       updateReminderIntervalDays: 7,
       hideAdultContent: false,
       exportPath: null,
+      cacheListCovers: true,
+      cacheFavoriteCovers: true,
+      cacheCharacterImages: false,
+      cacheStaffImages: false,
+      cacheBannerImages: false,
+      cacheTrendingCovers: false,
+      cacheSearchResults: false,
     );
   }
 
@@ -150,6 +185,13 @@ class UserSettings extends HiveObject {
       updateReminderIntervalDays: 7,
       hideAdultContent: false,
       exportPath: null,
+      cacheListCovers: true,
+      cacheFavoriteCovers: true,
+      cacheCharacterImages: false,
+      cacheStaffImages: false,
+      cacheBannerImages: false,
+      cacheTrendingCovers: false,
+      cacheSearchResults: false,
     );
   }
 
@@ -177,6 +219,13 @@ class UserSettings extends HiveObject {
     int? updateReminderIntervalDays,
     bool? hideAdultContent,
     String? exportPath,
+    bool? cacheListCovers,
+    bool? cacheFavoriteCovers,
+    bool? cacheCharacterImages,
+    bool? cacheStaffImages,
+    bool? cacheBannerImages,
+    bool? cacheTrendingCovers,
+    bool? cacheSearchResults,
   }) {
     return UserSettings(
       isPublicProfile: isPublicProfile ?? this.isPublicProfile,
@@ -202,6 +251,13 @@ class UserSettings extends HiveObject {
       updateReminderIntervalDays: updateReminderIntervalDays ?? this.updateReminderIntervalDays,
       hideAdultContent: hideAdultContent ?? this.hideAdultContent,
       exportPath: exportPath ?? this.exportPath,
+      cacheListCovers: cacheListCovers ?? this.cacheListCovers,
+      cacheFavoriteCovers: cacheFavoriteCovers ?? this.cacheFavoriteCovers,
+      cacheCharacterImages: cacheCharacterImages ?? this.cacheCharacterImages,
+      cacheStaffImages: cacheStaffImages ?? this.cacheStaffImages,
+      cacheBannerImages: cacheBannerImages ?? this.cacheBannerImages,
+      cacheTrendingCovers: cacheTrendingCovers ?? this.cacheTrendingCovers,
+      cacheSearchResults: cacheSearchResults ?? this.cacheSearchResults,
     );
   }
 
@@ -230,6 +286,13 @@ class UserSettings extends HiveObject {
       'updateReminderIntervalDays': updateReminderIntervalDays,
       'hideAdultContent': hideAdultContent,
       'exportPath': exportPath,
+      'cacheListCovers': cacheListCovers,
+      'cacheFavoriteCovers': cacheFavoriteCovers,
+      'cacheCharacterImages': cacheCharacterImages,
+      'cacheStaffImages': cacheStaffImages,
+      'cacheBannerImages': cacheBannerImages,
+      'cacheTrendingCovers': cacheTrendingCovers,
+      'cacheSearchResults': cacheSearchResults,
     };
   }
 
@@ -260,6 +323,13 @@ class UserSettings extends HiveObject {
       updateReminderIntervalDays: json['updateReminderIntervalDays'] as int? ?? 7,
       hideAdultContent: json['hideAdultContent'] as bool? ?? false,
       exportPath: json['exportPath'] as String?,
+      cacheListCovers: json['cacheListCovers'] as bool? ?? true,
+      cacheFavoriteCovers: json['cacheFavoriteCovers'] as bool? ?? true,
+      cacheCharacterImages: json['cacheCharacterImages'] as bool? ?? false,
+      cacheStaffImages: json['cacheStaffImages'] as bool? ?? false,
+      cacheBannerImages: json['cacheBannerImages'] as bool? ?? false,
+      cacheTrendingCovers: json['cacheTrendingCovers'] as bool? ?? false,
+      cacheSearchResults: json['cacheSearchResults'] as bool? ?? false,
     );
   }
 }

@@ -442,4 +442,193 @@ class SocialService {
       return [];
     }
   }
+
+  /// Toggle like on activity
+  Future<bool> toggleActivityLike(int activityId) async {
+    try {
+      final result = await _client.mutate(
+        MutationOptions(
+          document: gql(SocialQueries.toggleActivityLike),
+          variables: {'activityId': activityId},
+        ),
+      );
+
+      if (result.hasException) {
+        print('Toggle activity like error: ${result.exception}');
+        return false;
+      }
+
+      // Check if liked in response
+      final data = result.data?['ToggleLikeV2'];
+      return data?['isLiked'] == true;
+    } catch (e) {
+      print('Toggle activity like exception: $e');
+      return false;
+    }
+  }
+
+  /// Toggle like on activity reply
+  Future<bool> toggleActivityReplyLike(int replyId) async {
+    try {
+      final result = await _client.mutate(
+        MutationOptions(
+          document: gql(SocialQueries.toggleActivityReplyLike),
+          variables: {'replyId': replyId},
+        ),
+      );
+
+      if (result.hasException) {
+        print('Toggle reply like error: ${result.exception}');
+        return false;
+      }
+
+      final data = result.data?['ToggleLikeV2'];
+      return data?['isLiked'] == true;
+    } catch (e) {
+      print('Toggle reply like exception: $e');
+      return false;
+    }
+  }
+
+  /// Post a reply to an activity
+  Future<Map<String, dynamic>?> postActivityReply({
+    required int activityId,
+    required String text,
+    int? replyId, // For editing existing reply
+  }) async {
+    try {
+      final result = await _client.mutate(
+        MutationOptions(
+          document: gql(SocialQueries.saveActivityReply),
+          variables: {
+            'activityId': activityId,
+            'text': text,
+            if (replyId != null) 'id': replyId,
+          },
+        ),
+      );
+
+      if (result.hasException) {
+        print('Post activity reply error: ${result.exception}');
+        return null;
+      }
+
+      final data = result.data?['SaveActivityReply'];
+      return data != null ? Map<String, dynamic>.from(data) : null;
+    } catch (e) {
+      print('Post activity reply exception: $e');
+      return null;
+    }
+  }
+
+  /// Delete activity reply
+  Future<bool> deleteActivityReply(int replyId) async {
+    try {
+      final result = await _client.mutate(
+        MutationOptions(
+          document: gql(SocialQueries.deleteActivityReply),
+          variables: {'id': replyId},
+        ),
+      );
+
+      if (result.hasException) {
+        print('Delete activity reply error: ${result.exception}');
+        return false;
+      }
+
+      final data = result.data?['DeleteActivityReply'];
+      return data?['deleted'] == true;
+    } catch (e) {
+      print('Delete activity reply exception: $e');
+      return false;
+    }
+  }
+
+  /// Post a text activity (status update)
+  Future<Map<String, dynamic>?> postTextActivity({
+    required String text,
+    int? activityId, // For editing existing activity
+  }) async {
+    try {
+      final result = await _client.mutate(
+        MutationOptions(
+          document: gql(SocialQueries.saveTextActivity),
+          variables: {
+            'text': text,
+            if (activityId != null) 'id': activityId,
+          },
+        ),
+      );
+
+      if (result.hasException) {
+        print('Post text activity error: ${result.exception}');
+        return null;
+      }
+
+      final data = result.data?['SaveTextActivity'];
+      return data != null ? Map<String, dynamic>.from(data) : null;
+    } catch (e) {
+      print('Post text activity exception: $e');
+      return null;
+    }
+  }
+
+  /// Delete activity
+  Future<bool> deleteActivity(int activityId) async {
+    try {
+      final result = await _client.mutate(
+        MutationOptions(
+          document: gql(SocialQueries.deleteActivity),
+          variables: {'id': activityId},
+        ),
+      );
+
+      if (result.hasException) {
+        print('Delete activity error: ${result.exception}');
+        return false;
+      }
+
+      final data = result.data?['DeleteActivity'];
+      return data?['deleted'] == true;
+    } catch (e) {
+      print('Delete activity exception: $e');
+      return false;
+    }
+  }
+
+  /// Get activity replies
+  Future<List<Map<String, dynamic>>> getActivityReplies(
+    int activityId, {
+    int page = 1,
+    int perPage = 25,
+  }) async {
+    try {
+      final result = await _client.query(
+        QueryOptions(
+          document: gql(SocialQueries.getActivityReplies),
+          variables: {
+            'activityId': activityId,
+            'page': page,
+            'perPage': perPage,
+          },
+          fetchPolicy: FetchPolicy.networkOnly,
+        ),
+      );
+
+      if (result.hasException) {
+        print('Get activity replies error: ${result.exception}');
+        return [];
+      }
+
+      final replies = result.data?['Page']?['activityReplies'] as List<dynamic>?;
+      if (replies == null) return [];
+
+      return replies
+          .map((json) => Map<String, dynamic>.from(json as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Get activity replies exception: $e');
+      return [];
+    }
+  }
 }

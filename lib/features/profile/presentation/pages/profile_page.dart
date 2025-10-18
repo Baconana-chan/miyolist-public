@@ -17,6 +17,7 @@ import '../../../studio/presentation/pages/studio_details_page.dart';
 import '../../../statistics/presentation/pages/statistics_page.dart';
 import '../../../themes/custom_themes_page.dart';
 import '../../../settings/presentation/pages/push_notification_settings_page.dart';
+import '../../../settings/presentation/pages/offline_content_settings_page.dart';
 import '../widgets/privacy_settings_dialog.dart';
 import '../widgets/about_dialog.dart';
 import '../widgets/image_cache_settings_dialog.dart';
@@ -26,7 +27,9 @@ import '../widgets/rich_description_text.dart';
 import '../widgets/export_settings_dialog.dart';
 import '../../../image_gallery/presentation/image_gallery_page.dart';
 import '../../../social/domain/services/social_service.dart';
+import '../../../social/domain/services/friends_service.dart';
 import '../../../social/presentation/pages/following_followers_page.dart';
+import '../../../social/presentation/pages/friends_page.dart';
 
 
 class ProfilePage extends StatefulWidget {
@@ -289,6 +292,16 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   );
                   break;
+                case 'offline_content':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => OfflineContentSettingsPage(
+                        localStorageService: widget.localStorageService,
+                      ),
+                    ),
+                  );
+                  break;
                 case 'themes':
                   Navigator.push(
                     context,
@@ -357,6 +370,16 @@ class _ProfilePageState extends State<ProfilePage> {
                     Icon(Icons.image, color: AppTheme.textGray),
                     SizedBox(width: 12),
                     Text('Image Cache'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'offline_content',
+                child: Row(
+                  children: [
+                    Icon(Icons.cloud_download, color: AppTheme.textGray),
+                    SizedBox(width: 12),
+                    Text('Offline Content'),
                   ],
                 ),
               ),
@@ -486,59 +509,106 @@ class _ProfilePageState extends State<ProfilePage> {
                       if (_socialService != null)
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
+                          child: Column(
                             children: [
-                              // Following button
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => FollowingFollowersPage(
-                                          userId: _user!.id,
-                                          isFollowing: true,
-                                          socialService: _socialService!,
-                                          currentUserId: _user!.id,
-                                        ),
+                              Row(
+                                children: [
+                                  // Following button
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => FollowingFollowersPage(
+                                              userId: _user!.id,
+                                              isFollowing: true,
+                                              socialService: _socialService!,
+                                              currentUserId: _user!.id,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      style: OutlinedButton.styleFrom(
+                                        side: BorderSide(color: AppTheme.accentBlue.withOpacity(0.5)),
                                       ),
-                                    );
-                                  },
-                                  style: OutlinedButton.styleFrom(
-                                    side: BorderSide(color: AppTheme.accentBlue.withOpacity(0.5)),
+                                      child: Column(
+                                        children: [
+                                          Text(
+                                            '$_followingCount',
+                                            style: const TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                              color: AppTheme.accentBlue,
+                                            ),
+                                          ),
+                                          const Text(
+                                            'Following',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: AppTheme.textGray,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
-                                  child: Column(
-                                    children: [
-                                      Text(
-                                        '$_followingCount',
-                                        style: const TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                          color: AppTheme.accentBlue,
-                                        ),
+                                  const SizedBox(width: 12),
+                                  // Followers button
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => FollowingFollowersPage(
+                                              userId: _user!.id,
+                                              isFollowing: false,
+                                              socialService: _socialService!,
+                                              currentUserId: _user!.id,
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                      style: OutlinedButton.styleFrom(
+                                        side: BorderSide(color: AppTheme.accentGreen.withOpacity(0.5)),
                                       ),
-                                      const Text(
-                                        'Following',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: AppTheme.textGray,
-                                        ),
+                                      child: Column(
+                                        children: [
+                                          Text(
+                                            '$_followersCount',
+                                            style: const TextStyle(
+                                              fontSize: 20,
+                                              fontWeight: FontWeight.bold,
+                                              color: AppTheme.accentGreen,
+                                            ),
+                                          ),
+                                          const Text(
+                                            'Followers',
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              color: AppTheme.textGray,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
-                              const SizedBox(width: 12),
-                              // Followers button
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () {
+                              const SizedBox(height: 8),
+                              // Friends button (full width)
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final friendsService = FriendsService(_socialService!);
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (context) => FollowingFollowersPage(
+                                        builder: (context) => FriendsPage(
                                           userId: _user!.id,
-                                          isFollowing: false,
+                                          friendsService: friendsService,
                                           socialService: _socialService!,
                                           currentUserId: _user!.id,
                                         ),
@@ -546,26 +616,16 @@ class _ProfilePageState extends State<ProfilePage> {
                                     );
                                   },
                                   style: OutlinedButton.styleFrom(
-                                    side: BorderSide(color: AppTheme.accentGreen.withOpacity(0.5)),
+                                    side: BorderSide(color: AppTheme.accentPurple.withOpacity(0.5)),
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
                                   ),
-                                  child: Column(
-                                    children: [
-                                      Text(
-                                        '$_followersCount',
-                                        style: const TextStyle(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                          color: AppTheme.accentGreen,
-                                        ),
-                                      ),
-                                      const Text(
-                                        'Followers',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: AppTheme.textGray,
-                                        ),
-                                      ),
-                                    ],
+                                  icon: const Icon(Icons.people, color: AppTheme.accentPurple),
+                                  label: const Text(
+                                    'Friends (Mutual Follows)',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: AppTheme.accentPurple,
+                                    ),
                                   ),
                                 ),
                               ),

@@ -510,4 +510,136 @@ class SocialQueries {
       }
     }
   ''';
+
+  /// Toggle like on activity
+  static const String toggleActivityLike = r'''
+    mutation ($activityId: Int!) {
+      ToggleLikeV2(id: $activityId, type: ACTIVITY) {
+        ... on ListActivity {
+          id
+          likeCount
+          isLiked
+        }
+        ... on TextActivity {
+          id
+          likeCount
+          isLiked
+        }
+        ... on MessageActivity {
+          id
+          likeCount
+          isLiked
+        }
+      }
+    }
+  ''';
+
+  /// Toggle like on activity reply
+  static const String toggleActivityReplyLike = r'''
+    mutation ($replyId: Int!) {
+      ToggleLikeV2(id: $replyId, type: ACTIVITY_REPLY) {
+        ... on ActivityReply {
+          id
+          likeCount
+          isLiked
+        }
+      }
+    }
+  ''';
+
+  /// Save activity reply (create or update)
+  static const String saveActivityReply = r'''
+    mutation ($activityId: Int!, $text: String!, $id: Int) {
+      SaveActivityReply(activityId: $activityId, text: $text, id: $id) {
+        id
+        text
+        createdAt
+        likeCount
+        isLiked
+        user {
+          id
+          name
+          avatar {
+            large
+            medium
+          }
+          donatorTier
+          donatorBadge
+        }
+      }
+    }
+  ''';
+
+  /// Delete activity reply
+  static const String deleteActivityReply = r'''
+    mutation ($id: Int!) {
+      DeleteActivityReply(id: $id) {
+        deleted
+      }
+    }
+  ''';
+
+  /// Save text activity (create or update)
+  static const String saveTextActivity = r'''
+    mutation ($text: String!, $id: Int) {
+      SaveTextActivity(text: $text, id: $id) {
+        id
+        text
+        createdAt
+        likeCount
+        replyCount
+        isLiked
+        user {
+          id
+          name
+          avatar {
+            large
+            medium
+          }
+          donatorTier
+          donatorBadge
+        }
+      }
+    }
+  ''';
+
+  /// Delete activity
+  static const String deleteActivity = r'''
+    mutation ($id: Int!) {
+      DeleteActivity(id: $id) {
+        deleted
+      }
+    }
+  ''';
+
+  /// Get activity replies
+  static const String getActivityReplies = r'''
+    query ($activityId: Int!, $page: Int, $perPage: Int) {
+      Page(page: $page, perPage: $perPage) {
+        pageInfo {
+          total
+          currentPage
+          lastPage
+          hasNextPage
+        }
+        activityReplies(activityId: $activityId) {
+          id
+          text
+          createdAt
+          likeCount
+          isLiked
+          user {
+            id
+            name
+            avatar {
+              large
+              medium
+            }
+            donatorTier
+            donatorBadge
+          }
+        }
+      }
+    }
+  ''';
 }

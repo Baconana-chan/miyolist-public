@@ -414,19 +414,37 @@ class PushNotificationService {
         linux: linuxDetails,
       );
 
-      await _notifications.zonedSchedule(
-        id,
-        title,
-        message,
-        tz.TZDateTime.from(scheduledDate, tz.local),
-        notificationDetails,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        payload: payload,
-      );
-
-      print('✅ Notification scheduled for $scheduledDate (with actions: $includeActions)');
+      // Windows не поддерживает zonedSchedule, показываем уведомление сразу
+      if (Platform.isWindows) {
+        // Для Windows показываем уведомление немедленно, но только если время уже наступило
+        final now = DateTime.now();
+        if (scheduledDate.isBefore(now) || scheduledDate.difference(now).inMinutes < 1) {
+          await _notifications.show(
+            id,
+            title,
+            message,
+            notificationDetails,
+            payload: payload,
+          );
+          print('✅ Notification shown immediately on Windows (scheduled time: $scheduledDate)');
+        } else {
+          print('⚠️ Windows does not support scheduled notifications. Notification will be shown at next app launch.');
+        }
+      } else {
+        // Android и Linux поддерживают zonedSchedule
+        await _notifications.zonedSchedule(
+          id,
+          title,
+          message,
+          tz.TZDateTime.from(scheduledDate, tz.local),
+          notificationDetails,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          payload: payload,
+        );
+        print('✅ Notification scheduled for $scheduledDate (with actions: $includeActions)');
+      }
     } catch (e) {
       print('❌ Error scheduling notification: $e');
     }

@@ -53,8 +53,6 @@ class AniListService {
       return;
     }
     
-    print('🔧 Initializing AniList GraphQL client...');
-    
     final token = await _authService.getAccessToken();
     
     if (token == null) {
@@ -62,6 +60,7 @@ class AniListService {
       throw Exception('No access token available');
     }
     
+    print('🔧 Initializing AniList GraphQL client...');
     print('✅ Access token found');
     
     final httpLink = HttpLink(
@@ -90,7 +89,6 @@ class AniListService {
   /// Fetch authenticated user data
   Future<Map<String, dynamic>?> fetchCurrentUser() async {
     try {
-      print('🔧 Ensuring AniList client is initialized...');
       await _ensureInitialized();
       
       print('📡 Sending GraphQL query to fetch user...');

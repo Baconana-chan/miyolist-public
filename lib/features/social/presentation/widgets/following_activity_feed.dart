@@ -242,11 +242,199 @@ class _FollowingActivityFeedState extends State<FollowingActivityFeed> {
                 _buildListActivity(activity)
               else
                 Text('Unknown activity type: $type'),
+              
+              const SizedBox(height: 12),
+              
+              // Activity actions (like, reply)
+              _buildActivityActions(activity),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Widget _buildActivityActions(Map<String, dynamic> activity) {
+    final activityId = activity['id'] as int?;
+    final likeCount = activity['likeCount'] as int? ?? 0;
+    final replyCount = activity['replyCount'] as int? ?? 0;
+    final isLiked = activity['isLiked'] as bool? ?? false;
+
+    if (activityId == null) return const SizedBox.shrink();
+
+    return Row(
+      children: [
+        // Like button
+        InkWell(
+          onTap: () => _toggleLike(activityId),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isLiked ? Icons.favorite : Icons.favorite_border,
+                  size: 18,
+                  color: isLiked ? Colors.red : Colors.grey[600],
+                ),
+                if (likeCount > 0) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    '$likeCount',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isLiked ? Colors.red : Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Reply button
+        InkWell(
+          onTap: () => _showReplyDialog(activityId),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.comment_outlined,
+                  size: 18,
+                  color: Colors.grey[600],
+                ),
+                if (replyCount > 0) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    '$replyCount',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _toggleLike(int activityId) async {
+    try {
+      final isNowLiked = await widget.socialService.toggleActivityLike(activityId);
+      
+      // Update local state
+      setState(() {
+        final index = _activities.indexWhere((a) => a['id'] == activityId);
+        if (index != -1) {
+          final activity = _activities[index];
+          final currentLikes = activity['likeCount'] as int? ?? 0;
+          activity['isLiked'] = isNowLiked;
+          activity['likeCount'] = isNowLiked ? currentLikes + 1 : currentLikes - 1;
+        }
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isNowLiked ? 'Liked!' : 'Unliked'),
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Toggle like error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to toggle like'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _showReplyDialog(int activityId) async {
+    final textController = TextEditingController();
+    
+    final reply = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reply to Activity'),
+        content: TextField(
+          controller: textController,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'Write your reply...',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              if (textController.text.trim().isNotEmpty) {
+                Navigator.pop(context, textController.text.trim());
+              }
+            },
+            child: const Text('Post'),
+          ),
+        ],
+      ),
+    );
+
+    if (reply != null && reply.isNotEmpty) {
+      await _postReply(activityId, reply);
+    }
+  }
+
+  Future<void> _postReply(int activityId, String text) async {
+    try {
+      final replyData = await widget.socialService.postActivityReply(
+        activityId: activityId,
+        text: text,
+      );
+
+      if (replyData != null && mounted) {
+        // Update reply count
+        setState(() {
+          final index = _activities.indexWhere((a) => a['id'] == activityId);
+          if (index != -1) {
+            final activity = _activities[index];
+            final currentReplies = activity['replyCount'] as int? ?? 0;
+            activity['replyCount'] = currentReplies + 1;
+          }
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Reply posted!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Post reply error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to post reply'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildTextActivity(Map<String, dynamic> activity) {

@@ -120,7 +120,7 @@ class WelcomePage extends StatelessWidget {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      'v1.0.1 "Aoi (葵)"',
+                      'v1.1.0 "Botan (牡丹)"',
                       style: TextStyle(
                         color: colors.primaryText,
                         fontWeight: FontWeight.bold,
@@ -134,7 +134,7 @@ class WelcomePage extends StatelessWidget {
                 // Subtitle
                 Center(
                   child: Text(
-                    '🌸 Blue skies ahead',
+                    '🌸 Blooming connections',
                     style: TextStyle(
                       color: colors.secondaryText,
                       fontSize: 16,
@@ -145,17 +145,17 @@ class WelcomePage extends StatelessWidget {
                 const SizedBox(height: 24),
 
                 // Features list
-                _buildFeature('⚡', 'Lightning Fast', 
-                  'Pagination handles 2000+ titles smoothly'),
+                _buildFeature('👥', 'Social Features', 
+                  'Follow users, view profiles, and interact with activities'),
                 const SizedBox(height: 16),
-                _buildFeature('🔔', 'Real-time Updates', 
-                  'Airing schedules with countdown timers'),
+                _buildFeature('🤝', 'Friend System', 
+                  'Mutual follows with friend requests and management'),
                 const SizedBox(height: 16),
-                _buildFeature('📱', 'Offline Ready', 
-                  'Full functionality without internet'),
+                _buildFeature('�', 'Activity Feed', 
+                  'Like, reply, and post your own activities'),
                 const SizedBox(height: 16),
-                _buildFeature('🎨', 'Manga-styled UI', 
-                  'Beautiful dark theme with kaomoji'),
+                _buildFeature('📱', 'Offline Control', 
+                  'Choose exactly what content to cache offline'),
                 const SizedBox(height: 32),
 
                 // Button

@@ -17,6 +17,7 @@ import '../widgets/trending_media_section.dart';
 import '../../../notifications/presentation/pages/notifications_page.dart';
 import '../../../social/domain/services/social_service.dart';
 import '../../../social/presentation/widgets/following_activity_feed.dart';
+import '../../../social/presentation/pages/create_activity_page.dart';
 
 class ActivityPage extends StatefulWidget {
   final AuthService authService;
@@ -56,6 +57,11 @@ class _ActivityPageState extends State<ActivityPage> with SingleTickerProviderSt
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this); // Changed from 3 to 4
+    _tabController.addListener(() {
+      if (mounted) {
+        setState(() {}); // Rebuild to show/hide create activity button
+      }
+    });
     _airingService = AiringScheduleService(widget.authService, widget.localStorageService);
     _trendingService = TrendingService(widget.authService);
     _anilistService = AniListService(widget.authService);
@@ -163,6 +169,14 @@ class _ActivityPageState extends State<ActivityPage> with SingleTickerProviderSt
           style: TextStyle(color: AppTheme.textWhite),
         ),
         actions: [
+          // Create activity button (only on Following tab)
+          if (_tabController.index == 3 && _socialService != null && _currentUserId != null)
+            IconButton(
+              icon: const Icon(Icons.add_comment),
+              color: AppTheme.textWhite,
+              tooltip: 'Create Activity',
+              onPressed: () => _createActivity(),
+            ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
             color: AppTheme.textWhite,
@@ -489,5 +503,26 @@ class _ActivityPageState extends State<ActivityPage> with SingleTickerProviderSt
         ),
       ],
     );
+  }
+
+  Future<void> _createActivity() async {
+    if (_socialService == null || _currentUserId == null) return;
+
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => CreateActivityPage(
+          socialService: _socialService!,
+          currentUserId: _currentUserId,
+        ),
+      ),
+    );
+
+    // If activity was posted, refresh the feed
+    if (result == true && mounted) {
+      setState(() {
+        // This will trigger a rebuild of the Following tab
+      });
+    }
   }
 }
