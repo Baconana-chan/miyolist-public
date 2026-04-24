@@ -7,23 +7,36 @@ mod models;
 mod notifications;
 mod settings;
 
+#[cfg(desktop)]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(desktop)]
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(desktop)]
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
+#[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+#[cfg(desktop)]
 use tauri::{Manager, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 
+#[cfg(desktop)]
 const TRAY_ID: &str = "main-tray";
+#[cfg(desktop)]
 const TRAY_MENU_OPEN: &str = "tray_open";
+#[cfg(desktop)]
 const TRAY_MENU_SYNC: &str = "tray_quick_sync";
+#[cfg(desktop)]
 const TRAY_MENU_NEXT_AIRING: &str = "tray_next_airing";
+#[cfg(desktop)]
 const TRAY_MENU_QUIT: &str = "tray_quit";
+#[cfg(desktop)]
 const TRAY_NOTICE_SHOWN_KEY: &str = "tray_notice_shown";
 
+#[cfg(desktop)]
 static EXITING_FROM_TRAY: AtomicBool = AtomicBool::new(false);
 
+#[cfg(desktop)]
 fn next_airing_label(app: &tauri::AppHandle) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -40,6 +53,7 @@ fn next_airing_label(app: &tauri::AppHandle) -> String {
     }
 }
 
+#[cfg(desktop)]
 fn update_tray_badge(app: &tauri::AppHandle) {
     let count = crate::db::get_unnotified_aired_count(app).unwrap_or(0);
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
@@ -62,6 +76,7 @@ fn update_tray_badge(app: &tauri::AppHandle) {
     }
 }
 
+#[cfg(desktop)]
 fn restore_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -76,83 +91,90 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let next_airing = next_airing_label(app.handle());
+            #[cfg(desktop)]
+            {
+                let next_airing = next_airing_label(app.handle());
 
-            let tray_menu = MenuBuilder::new(app)
-                .item(&MenuItemBuilder::with_id(TRAY_MENU_OPEN, "Open MiyoList").build(app)?)
-                .item(&MenuItemBuilder::with_id(TRAY_MENU_SYNC, "Quick Sync").build(app)?)
-                .item(&MenuItemBuilder::with_id(TRAY_MENU_NEXT_AIRING, next_airing).enabled(false).build(app)?)
-                .separator()
-                .item(&MenuItemBuilder::with_id(TRAY_MENU_QUIT, "Quit").build(app)?)
-                .build()?;
+                let tray_menu = MenuBuilder::new(app)
+                    .item(&MenuItemBuilder::with_id(TRAY_MENU_OPEN, "Open MiyoList").build(app)?)
+                    .item(&MenuItemBuilder::with_id(TRAY_MENU_SYNC, "Quick Sync").build(app)?)
+                    .item(&MenuItemBuilder::with_id(TRAY_MENU_NEXT_AIRING, next_airing).enabled(false).build(app)?)
+                    .separator()
+                    .item(&MenuItemBuilder::with_id(TRAY_MENU_QUIT, "Quit").build(app)?)
+                    .build()?;
 
-            TrayIconBuilder::with_id(TRAY_ID)
-                .icon(app.default_window_icon().cloned().expect("default window icon missing"))
-                .tooltip("MiyoList")
-                .menu(&tray_menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    TRAY_MENU_OPEN => {
-                        restore_main_window(app);
-                    }
-                    TRAY_MENU_SYNC => {
-                        let _ = crate::anilist::fetch_viewer(app);
-                        let _ = crate::anilist::sync_lists_smart(app);
-                        update_tray_badge(app);
-                    }
-                    TRAY_MENU_NEXT_AIRING => {
-                        let title = next_airing_label(app);
-                        let _ = app.notification().builder().title("MiyoList").body(&title).show();
-                    }
-                    TRAY_MENU_QUIT => {
-                        EXITING_FROM_TRAY.store(true, Ordering::SeqCst);
-                        app.exit(0);
-                    }
-                    _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                    {
-                        restore_main_window(tray.app_handle());
-                    }
-                })
-                .build(app)?;
+                TrayIconBuilder::with_id(TRAY_ID)
+                    .icon(app.default_window_icon().cloned().expect("default window icon missing"))
+                    .tooltip("MiyoList")
+                    .menu(&tray_menu)
+                    .show_menu_on_left_click(true)
+                    .on_menu_event(|app, event| match event.id().as_ref() {
+                        TRAY_MENU_OPEN => {
+                            restore_main_window(app);
+                        }
+                        TRAY_MENU_SYNC => {
+                            let _ = crate::anilist::fetch_viewer(app);
+                            let _ = crate::anilist::sync_lists_smart(app);
+                            update_tray_badge(app);
+                        }
+                        TRAY_MENU_NEXT_AIRING => {
+                            let title = next_airing_label(app);
+                            let _ = app.notification().builder().title("MiyoList").body(&title).show();
+                        }
+                        TRAY_MENU_QUIT => {
+                            EXITING_FROM_TRAY.store(true, Ordering::SeqCst);
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            restore_main_window(tray.app_handle());
+                        }
+                    })
+                    .build(app)?;
 
-            update_tray_badge(app.handle());
+                update_tray_badge(app.handle());
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if EXITING_FROM_TRAY.load(Ordering::SeqCst) {
-                    return;
-                }
+            #[cfg(desktop)]
+            {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    if EXITING_FROM_TRAY.load(Ordering::SeqCst) {
+                        return;
+                    }
 
-                let app = window.app_handle();
-                let should_minimize = crate::db::get_app_settings(app)
-                    .map(|s| s.minimize_to_tray_on_close)
-                    .unwrap_or(false);
-
-                if should_minimize {
-                    api.prevent_close();
-                    let _ = window.hide();
-
-                    let already_shown = crate::db::get_bool_app_setting(app, TRAY_NOTICE_SHOWN_KEY)
-                        .ok()
-                        .flatten()
+                    let app = window.app_handle();
+                    let should_minimize = crate::db::get_app_settings(app)
+                        .map(|s| s.minimize_to_tray_on_close)
                         .unwrap_or(false);
 
-                    if !already_shown {
-                        let _ = app
-                            .notification()
-                            .builder()
-                            .title("MiyoList is still running")
-                            .body("The app was minimized to the system tray. Use the tray icon to reopen it.")
-                            .show();
-                        let _ = crate::db::set_bool_app_setting(app, TRAY_NOTICE_SHOWN_KEY, true);
+                    if should_minimize {
+                        api.prevent_close();
+                        let _ = window.hide();
+
+                        let already_shown = crate::db::get_bool_app_setting(app, TRAY_NOTICE_SHOWN_KEY)
+                            .ok()
+                            .flatten()
+                            .unwrap_or(false);
+
+                        if !already_shown {
+                            let _ = app
+                                .notification()
+                                .builder()
+                                .title("MiyoList is still running")
+                                .body("The app was minimized to the system tray. Use the tray icon to reopen it.")
+                                .show();
+                            let _ = crate::db::set_bool_app_setting(app, TRAY_NOTICE_SHOWN_KEY, true);
+                        }
                     }
                 }
             }
