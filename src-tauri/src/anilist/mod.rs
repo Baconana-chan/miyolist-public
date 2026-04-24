@@ -31,6 +31,15 @@ const VAR_AUTH_URL: &str = "ANILIST_AUTH_URL";
 const VAR_TOKEN_URL: &str = "ANILIST_TOKEN_URL";
 const VAR_GRAPHQL_URL: &str = "ANILIST_GRAPHQL_URL";
 
+// Compile-time fallbacks for release builds produced in CI.
+// If runtime env/.env is missing on an end-user machine, these values allow
+// the app to keep working with the configuration baked into the binary.
+const BUILD_CLIENT_ID: Option<&str> = option_env!("ANILIST_CLIENT_ID");
+const BUILD_CLIENT_SECRET: Option<&str> = option_env!("ANILIST_CLIENT_SECRET");
+const BUILD_AUTH_URL: Option<&str> = option_env!("ANILIST_AUTH_URL");
+const BUILD_TOKEN_URL: Option<&str> = option_env!("ANILIST_TOKEN_URL");
+const BUILD_GRAPHQL_URL: Option<&str> = option_env!("ANILIST_GRAPHQL_URL");
+
 /// AniList allows 90 requests per minute; use 85 to leave a safety margin.
 const RATE_LIMIT_MAX: usize = 85;
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
@@ -287,23 +296,29 @@ pub fn config_status() -> AniListConfigStatus {
 
 pub fn load_config() -> Result<AniListConfig, String> {
     let uses_env_file = dotenvy::dotenv().is_ok();
-    let client_id = env_var(VAR_CLIENT_ID).ok_or_else(|| missing_var(VAR_CLIENT_ID))?;
-    let client_secret = env_var(VAR_CLIENT_SECRET);
+    let client_id = env_or_build(VAR_CLIENT_ID, BUILD_CLIENT_ID)
+        .ok_or_else(|| missing_var(VAR_CLIENT_ID))?;
+    let client_secret = env_or_build(VAR_CLIENT_SECRET, BUILD_CLIENT_SECRET);
 
     Ok(AniListConfig {
         client_id,
         client_secret,
-        auth_url: env_var(VAR_AUTH_URL).unwrap_or_else(|| DEFAULT_AUTH_URL.into()),
-        token_url: env_var(VAR_TOKEN_URL).unwrap_or_else(|| DEFAULT_TOKEN_URL.into()),
-        graphql_url: env_var(VAR_GRAPHQL_URL).unwrap_or_else(|| DEFAULT_GRAPHQL_URL.into()),
+        auth_url: env_or_build(VAR_AUTH_URL, BUILD_AUTH_URL)
+            .unwrap_or_else(|| DEFAULT_AUTH_URL.into()),
+        token_url: env_or_build(VAR_TOKEN_URL, BUILD_TOKEN_URL)
+            .unwrap_or_else(|| DEFAULT_TOKEN_URL.into()),
+        graphql_url: env_or_build(VAR_GRAPHQL_URL, BUILD_GRAPHQL_URL)
+            .unwrap_or_else(|| DEFAULT_GRAPHQL_URL.into()),
         uses_env_file,
     })
 }
 
 pub fn load_public_config() -> Result<AniListPublicConfig, String> {
     Ok(AniListPublicConfig {
-        client_id: env_var(VAR_CLIENT_ID).ok_or_else(|| missing_var(VAR_CLIENT_ID))?,
-        auth_url: env_var(VAR_AUTH_URL).unwrap_or_else(|| DEFAULT_AUTH_URL.into()),
+        client_id: env_or_build(VAR_CLIENT_ID, BUILD_CLIENT_ID)
+            .ok_or_else(|| missing_var(VAR_CLIENT_ID))?,
+        auth_url: env_or_build(VAR_AUTH_URL, BUILD_AUTH_URL)
+            .unwrap_or_else(|| DEFAULT_AUTH_URL.into()),
     })
 }
 
@@ -1695,6 +1710,17 @@ fn read_access_token(app: &AppHandle) -> Result<String, String> {
 fn env_var(name: &str) -> Option<String> {
     dotenvy::dotenv().ok();
     env::var(name).ok().filter(|value| !value.trim().is_empty())
+}
+
+fn build_var(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn env_or_build(name: &str, build_value: Option<&str>) -> Option<String> {
+    env_var(name).or_else(|| build_var(build_value))
 }
 
 fn missing_var(name: &str) -> String {

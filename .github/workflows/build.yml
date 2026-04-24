@@ -56,6 +56,12 @@ jobs:
     name: Build (${{ matrix.platform.name }})
     needs: preflight
     runs-on: ${{ matrix.platform.runner }}
+    env:
+      ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
+      ANILIST_CLIENT_SECRET: ${{ secrets.ANILIST_CLIENT_SECRET }}
+      ANILIST_AUTH_URL: ${{ secrets.ANILIST_AUTH_URL }}
+      ANILIST_TOKEN_URL: ${{ secrets.ANILIST_TOKEN_URL }}
+      ANILIST_GRAPHQL_URL: ${{ secrets.ANILIST_GRAPHQL_URL }}
     strategy:
       fail-fast: false
       matrix:
@@ -190,6 +196,12 @@ jobs:
     name: Build (Android arm64 APK)
     needs: preflight
     runs-on: ubuntu-latest
+    env:
+      ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
+      ANILIST_CLIENT_SECRET: ${{ secrets.ANILIST_CLIENT_SECRET }}
+      ANILIST_AUTH_URL: ${{ secrets.ANILIST_AUTH_URL }}
+      ANILIST_TOKEN_URL: ${{ secrets.ANILIST_TOKEN_URL }}
+      ANILIST_GRAPHQL_URL: ${{ secrets.ANILIST_GRAPHQL_URL }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -260,6 +272,12 @@ jobs:
       - preflight
       - build
     runs-on: windows-latest
+    env:
+      ANILIST_CLIENT_ID: ${{ secrets.ANILIST_CLIENT_ID }}
+      ANILIST_CLIENT_SECRET: ${{ secrets.ANILIST_CLIENT_SECRET }}
+      ANILIST_AUTH_URL: ${{ secrets.ANILIST_AUTH_URL }}
+      ANILIST_TOKEN_URL: ${{ secrets.ANILIST_TOKEN_URL }}
+      ANILIST_GRAPHQL_URL: ${{ secrets.ANILIST_GRAPHQL_URL }}
     steps:
       - uses: actions/checkout@v5
         with:
