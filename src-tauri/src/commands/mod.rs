@@ -57,6 +57,11 @@ pub fn get_anilist_config_status() -> AniListConfigStatus {
 }
 
 #[tauri::command]
+pub fn get_online_status() -> bool {
+    crate::anilist::is_online()
+}
+
+#[tauri::command]
 pub fn get_viewer(app: AppHandle) -> Result<AniListViewer, String> {
     crate::anilist::fetch_viewer(&app)
 }

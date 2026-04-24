@@ -1,4 +1,5 @@
-const PROBE_URL = "https://anilist.co";
+import { invoke } from "@tauri-apps/api/core";
+
 const PROBE_INTERVAL_MS = 30_000;
 
 type Listener = (online: boolean) => void;
@@ -16,13 +17,8 @@ function emit(nextOnline: boolean) {
 
 async function pingAniList(): Promise<boolean> {
   try {
-    // no-cors returns opaque responses in browsers/webviews but resolves when reachable.
-    await fetch(PROBE_URL, {
-      method: "HEAD",
-      mode: "no-cors",
-      cache: "no-store",
-    });
-    return true;
+    // Probe via backend to avoid browser/webview CORS/CORB restrictions.
+    return await invoke<boolean>("get_online_status");
   } catch {
     return false;
   }

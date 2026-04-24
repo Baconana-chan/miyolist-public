@@ -464,6 +464,8 @@ export function SettingsSurface() {
         <div class="flex gap-2 items-stretch">
           <input
             ref={importRef}
+            id="settings-import-path"
+            name="settingsImportPath"
             type="text"
             placeholder="C:\Users\...\library_1234567890.json"
             value={importPath}

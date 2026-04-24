@@ -124,7 +124,7 @@ export function getListEntryByMediaId(mediaId: number) {
 }
 
 export function syncUserLists() {
-  return invokeRemote<SyncSummary>("sync_user_lists", undefined, EMPTY_SYNC_SUMMARY);
+  return invokeRemote<SyncSummary>("sync_user_lists");
 }
 
 export function pushDirtyEntries() {

@@ -84,6 +84,55 @@ type LibraryMetaCache = {
 const LIBRARY_VIEW_CACHE = new Map<string, ListEntry[]>();
 let LIBRARY_META_CACHE: LibraryMetaCache | null = null;
 
+export function invalidateLibraryCache() {
+  LIBRARY_VIEW_CACHE.clear();
+  LIBRARY_META_CACHE = null;
+}
+
+type SyncMessageTone = "neutral" | "warning" | "error";
+
+function formatSyncFailure(error: unknown): { message: string; tone: SyncMessageTone } {
+  const raw = String(error ?? "");
+  const upper = raw.toUpperCase();
+
+  if (
+    upper.includes("[VIEWER_FETCH_FAILED]")
+    && upper.includes("403")
+    && raw.toLowerCase().includes("temporarily disabled")
+  ) {
+    return {
+      message: "AniList API is temporarily disabled on AniList's side (HTTP 403). This is an upstream incident, not an app issue.",
+      tone: "warning",
+    };
+  }
+
+  if (upper.includes("[OFFLINE]")) {
+    return {
+      message: "No internet connection. Check your network and try syncing again.",
+      tone: "warning",
+    };
+  }
+
+  if (upper.includes("[RATE_LIMITED]")) {
+    return {
+      message: "AniList temporarily rate-limited requests. Please try again in a moment.",
+      tone: "warning",
+    };
+  }
+
+  if (upper.includes("[HTTP_ERROR]")) {
+    return {
+      message: "AniList API returned an error. This is most likely on AniList's side, not the app.",
+      tone: "warning",
+    };
+  }
+
+  return {
+    message: `Sync failed: ${raw}`,
+    tone: "error",
+  };
+}
+
 // ─── Empty state ─────────────────────────────────────────────────────────────
 
 function EmptyState({ onNavigate }: { onNavigate: (screen: ScreenId) => void }) {
@@ -294,6 +343,7 @@ export function LibrarySurface({ onNavigate, onEntryEdited }: LibrarySurfaceProp
   const [loading,         setLoading]         = useState(true);
   const [syncing,         setSyncing]         = useState(false);
   const [syncMsg,         setSyncMsg]         = useState<string | null>(null);
+  const [syncMsgTone,     setSyncMsgTone]     = useState<SyncMessageTone>("neutral");
   const [editEntry,       setEditEntry]       = useState<ListEntry | null>(null);
     const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [detailsId,       setDetailsId]       = useState<number | null>(null);
@@ -488,6 +538,7 @@ export function LibrarySurface({ onNavigate, onEntryEdited }: LibrarySurfaceProp
   async function handleSync() {
     setSyncing(true);
     setSyncMsg(null);
+    setSyncMsgTone("neutral");
     try {
       const result = await syncUserLists();
       const parts: string[] = [];
@@ -502,13 +553,19 @@ export function LibrarySurface({ onNavigate, onEntryEdited }: LibrarySurfaceProp
           ? baseMsg + " — click to resolve"
           : baseMsg
       );
+      setSyncMsgTone("neutral");
       if (result.conflicts > 0) setShowConflictDialog(true);
       await loadData(mediaKind, activeStatus, true);
+      setTimeout(() => {
+        setSyncMsg(null);
+        setSyncMsgTone("neutral");
+      }, 4000);
     } catch (e) {
-      setSyncMsg(`Sync failed: ${e}`);
+      const failure = formatSyncFailure(e);
+      setSyncMsg(failure.message);
+      setSyncMsgTone(failure.tone);
     } finally {
       setSyncing(false);
-      setTimeout(() => setSyncMsg(null), 4000);
     }
   }
 
@@ -550,7 +607,17 @@ export function LibrarySurface({ onNavigate, onEntryEdited }: LibrarySurfaceProp
             Library
           </h1>
           <div class="flex items-center gap-2">
-            {syncMsg && <span class="text-[0.8rem] text-[#7a766e]">{syncMsg}</span>}
+            {syncMsg && (
+              <span class={`max-w-[48ch] rounded-full border px-3 py-1.5 text-[0.78rem] ${
+                syncMsgTone === "warning"
+                  ? "border-[rgba(212,184,106,0.45)] bg-[rgba(212,184,106,0.12)] text-[#d4b86a]"
+                  : syncMsgTone === "error"
+                    ? "border-[rgba(224,138,138,0.45)] bg-[rgba(224,138,138,0.12)] text-[#e08a8a]"
+                    : "border-white/10 bg-white/4 text-[#7a766e]"
+              }`}>
+                {syncMsg}
+              </span>
+            )}
             {!syncMsg && dirtyCount > 0 && (
               <span class="flex items-center gap-1 text-[0.78rem] text-[#c4924a]" title={`${dirtyCount} unsaved change${dirtyCount > 1 ? "s" : ""} pending upload`}>
                 <span class="h-1.5 w-1.5 rounded-full bg-[#d97452] animate-pulse" />
@@ -635,6 +702,8 @@ export function LibrarySurface({ onNavigate, onEntryEdited }: LibrarySurfaceProp
                 <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
               </svg>
               <input
+                id="library-search"
+                name="librarySearch"
                 type="text"
                 placeholder={`Search ${mediaKind === "anime" ? "anime" : mediaKind === "manga" ? "manga" : "light novels"}…`}
                 class="w-full rounded-xl border border-white/8 bg-white/4 py-2 pl-8 pr-3 text-[0.87rem] text-[#f1efe7] placeholder-[#5a5650] focus:border-white/15 focus:outline-none"

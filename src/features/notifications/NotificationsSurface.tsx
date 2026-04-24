@@ -182,6 +182,8 @@ export function NotificationsSurface() {
           Search in notifications
         </label>
         <input
+          id="notifications-search"
+          name="notificationsSearch"
           type="text"
           value={query}
           onInput={(e) => setQuery((e.target as HTMLInputElement).value)}

@@ -2272,8 +2272,15 @@ pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
     });
 
     // 2. Choose delta vs. full sync.
+    // Force a full sync when the local library is empty even if a HWM exists
+    // (covers reinstalls / DB resets where the settings table survived but
+    // media_list_entries was cleared — delta would find nothing and wrongly
+    // report "Up to date").
     let hwm = crate::db::get_sync_high_water(app).unwrap_or(None);
-    let (synced, conflicts, is_delta, new_hwm) = if let Some(ts) = hwm {
+    let library_empty = crate::db::get_library_snapshot(app)
+        .map(|s| s.total_entries == 0)
+        .unwrap_or(true);
+    let (synced, conflicts, is_delta, new_hwm) = if let Some(ts) = hwm.filter(|_| !library_empty) {
         let (a, ac, ah) = fetch_user_lists_delta(app, "ANIME", ts).unwrap_or((0, 0, ts));
         let (m, mc, mh) = fetch_user_lists_delta(app, "MANGA", ts).unwrap_or((0, 0, ts));
         (a + m, ac + mc, true, ah.max(mh))

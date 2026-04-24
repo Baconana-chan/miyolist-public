@@ -6,7 +6,7 @@ import { checkNotifications, getAppSettings, prefetchCovers, pushDirtyEntries, r
 import { useOnlineStatus } from "../shared/hooks/useOnlineStatus";
 import type { AuthSessionStatus, ScreenId } from "../shared/types/app";
 import { AuthSurface } from "../features/auth/AuthSurface";
-import { LibrarySurface } from "../features/library/LibrarySurface";
+import { LibrarySurface, invalidateLibraryCache } from "../features/library/LibrarySurface";
 import { DiscoverySurface } from "../features/discovery/DiscoverySurface";
 import { ActivitySurface } from "../features/activity/ActivitySurface";
 import { NotificationsSurface } from "../features/notifications/NotificationsSurface";
@@ -105,6 +105,8 @@ type NavItem = {
   Icon: () => JSX.Element;
 };
 
+const MOBILE_BREAKPOINT_PX = 900;
+
 const NAV: NavItem[] = [
   { id: "library",    label: "Library",  Icon: IconBook     },
   { id: "discovery",  label: "Discover", Icon: IconCompass  },
@@ -115,6 +117,34 @@ const NAV: NavItem[] = [
   { id: "statistics", label: "Stats",    Icon: IconChart    },
   { id: "settings",   label: "Settings", Icon: IconGear     },
 ];
+
+const MOBILE_NAV_ORDER: ScreenId[] = [
+  "library",
+  "discovery",
+  "search",
+  "schedule",
+  "activity",
+  "notifications",
+  "statistics",
+  "settings",
+];
+
+function useMobileShell() {
+  const [mobile, setMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const query = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`);
+    const apply = () => setMobile(query.matches);
+    apply();
+
+    query.addEventListener("change", apply);
+    return () => query.removeEventListener("change", apply);
+  }, []);
+
+  return mobile;
+}
 
 function SideSheetHost() {
   const sideSheet = useSideSheet();
@@ -142,7 +172,11 @@ function SideSheetHost() {
         <div class="flex h-full flex-row-reverse items-stretch gap-3 overflow-x-auto p-3 [scrollbar-width:thin] [scrollbar-color:#2e2c29_transparent]">
         {sideSheet.stack.map((entry, index) => {
           const isActive = index === sideSheet.activeIndex;
-          const panelWidth = entry.span === 3 ? "w-[72rem]" : entry.span === 2 ? "w-[48rem]" : "w-[24rem]";
+          const panelWidth = entry.span === 3
+            ? "w-[min(72rem,calc(100vw-1rem))]"
+            : entry.span === 2
+              ? "w-[min(48rem,calc(100vw-1rem))]"
+              : "w-[min(24rem,calc(100vw-1rem))]";
           const panelLabel = entry.type === "user" ? `user · ${entry.username}` : entry.type;
           const canResize = entry.type === "user";
           return (
@@ -334,7 +368,9 @@ function AppShellContent() {
   const [screen,  setScreen]    = useState<ScreenId>("library");
   const [booting, setBooting]   = useState(true);
   const [surfaceRefreshKey, setSurfaceRefreshKey] = useState(0);
+  const [manualSyncing, setManualSyncing] = useState(false);
   const online = useOnlineStatus();
+  const mobileShell = useMobileShell();
   const wasOnlineRef = useRef<boolean>(online);
 
   // ── Dirty-entry flush: push any pending local edits to AniList 60 s after
@@ -420,6 +456,132 @@ function AppShellContent() {
 
   function handleLogout() {
     setSession({ hasAccessToken: false, viewerId: null, viewerName: null, viewerAvatarUrl: null, tokenExpiresAt: null, isTokenExpired: false, updatedAt: null });
+  }
+
+  const renderActiveSurface = () => (
+    <>
+      {screen === "library"    && <LibrarySurface key={`library:${surfaceRefreshKey}`} session={session} onNavigate={setScreen} onEntryEdited={scheduleAutoSync} />}
+      {screen === "discovery"  && <DiscoverySurface key={`discovery:${surfaceRefreshKey}`} />}
+      {screen === "activity"   && <ActivitySurface key={`activity:${surfaceRefreshKey}`} />}
+      {screen === "notifications" && <NotificationsSurface key={`notifications:${surfaceRefreshKey}`} />}
+      {screen === "search"     && <SearchSurface key={`search:${surfaceRefreshKey}`} onNavigate={setScreen} />}
+      {screen === "schedule"   && <ScheduleSurface key={`schedule:${surfaceRefreshKey}`} />}
+      {screen === "statistics" && <StatisticsSurface key={`statistics:${surfaceRefreshKey}`} />}
+      {screen === "settings"   && <SettingsSurface key={`settings:${surfaceRefreshKey}`} />}
+      {screen === "auth"       && <AuthSurface key={`auth:${surfaceRefreshKey}`} session={session} onAuthenticated={setSession} onLogout={handleLogout} />}
+    </>
+  );
+
+  const activeNav = NAV.find((item) => item.id === screen);
+
+  async function handleManualSync() {
+    if (manualSyncing) return;
+    setManualSyncing(true);
+    try {
+      await syncUserLists();
+      invalidateLibraryCache();
+      setSurfaceRefreshKey((n) => n + 1);
+    } catch {
+      // Keep manual sync quiet in shell; feature surfaces show detailed states.
+    } finally {
+      setManualSyncing(false);
+    }
+  }
+
+  if (mobileShell) {
+    return (
+      <div class="relative flex h-screen flex-col overflow-hidden bg-[radial-gradient(1100px_520px_at_22%_-12%,rgba(217,116,82,0.12),transparent_62%),radial-gradient(900px_440px_at_78%_0%,rgba(94,122,144,0.16),transparent_58%),#0d0f12]">
+        <SideSheetShortcuts setScreen={setScreen} setSurfaceRefreshKey={setSurfaceRefreshKey} />
+
+        {!online && (
+          <div class="z-20 border-b border-[rgba(190,130,90,0.35)] bg-[rgba(44,36,28,0.92)] px-4 py-2 text-[0.78rem] text-[#d7c3a2] backdrop-blur">
+            Offline mode: showing local data. Sync resumes automatically once online.
+          </div>
+        )}
+
+        <header class="z-20 flex shrink-0 items-center justify-between border-b border-white/8 bg-[rgba(15,16,19,0.78)] px-4 pb-3 pt-[calc(0.7rem+env(safe-area-inset-top))] backdrop-blur-xl">
+          <div class="min-w-0">
+            <p class="text-[0.68rem] uppercase tracking-[0.14em] text-[#73889b]">MiyoList</p>
+            <h1 class="truncate text-[1.35rem] font-bold tracking-[-0.02em] text-[#f1efe7]">{activeNav?.label ?? "Screen"}</h1>
+          </div>
+          <div class="flex items-center gap-2">
+            <button
+              class="rounded-full border border-[rgba(255,255,255,0.12)] bg-white/5 px-3 py-1.5 text-[0.76rem] font-semibold text-[#d9d5cc] transition hover:bg-white/10 disabled:opacity-50"
+              onClick={handleManualSync}
+              disabled={manualSyncing}
+            >
+              {manualSyncing ? "Syncing..." : "Sync"}
+            </button>
+            <button
+              class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/12 bg-white/5"
+              onClick={() => setScreen("auth")}
+              title="Account"
+            >
+              {session.viewerAvatarUrl ? (
+                <img
+                  src={session.viewerAvatarUrl}
+                  alt={session.viewerName ?? ""}
+                  class="h-full w-full object-cover"
+                />
+              ) : (
+                <span class="text-[0.8rem] font-bold text-[#f1efe7]">{session.viewerName?.[0]?.toUpperCase() ?? "?"}</span>
+              )}
+            </button>
+          </div>
+        </header>
+
+        <main class="min-h-0 flex-1 overflow-y-auto pb-[calc(4.8rem+env(safe-area-inset-bottom))]">
+          {renderActiveSurface()}
+        </main>
+
+        <nav class="z-30 shrink-0 border-t border-white/10 bg-[rgba(13,15,18,0.94)] px-2 pb-[calc(0.35rem+env(safe-area-inset-bottom))] pt-1.5 backdrop-blur-xl">
+          <ul class="flex items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {MOBILE_NAV_ORDER.map((id) => {
+              const item = NAV.find((candidate) => candidate.id === id);
+              if (!item) return null;
+              const active = screen === id;
+              const { Icon, label } = item;
+              return (
+                <li key={id}>
+                  <button
+                    class={`flex min-w-[4.65rem] flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 text-[0.66rem] font-semibold tracking-[0.01em] transition ${
+                      active
+                        ? "bg-[rgba(217,116,82,0.2)] text-[#f1efe7]"
+                        : "text-[#8b877f] hover:bg-white/6 hover:text-[#ded9d0]"
+                    }`}
+                    onClick={() => setScreen(id)}
+                    title={label}
+                  >
+                    <span class={`${active ? "text-[#f29a7c]" : "text-[#6f8ca5]"}`}>
+                      <Icon />
+                    </span>
+                    <span>{label}</span>
+                  </button>
+                </li>
+              );
+            })}
+            <li>
+              <button
+                class={`flex min-w-[4.65rem] flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 text-[0.66rem] font-semibold tracking-[0.01em] transition ${
+                  screen === "auth"
+                    ? "bg-[rgba(217,116,82,0.2)] text-[#f1efe7]"
+                    : "text-[#8b877f] hover:bg-white/6 hover:text-[#ded9d0]"
+                }`}
+                onClick={() => setScreen("auth")}
+                title="Account"
+              >
+                <span class={`${screen === "auth" ? "text-[#f29a7c]" : "text-[#6f8ca5]"}`}>
+                  <IconGear />
+                </span>
+                <span>Account</span>
+              </button>
+            </li>
+          </ul>
+        </nav>
+
+        <SideSheetHost />
+      </div>
+    );
   }
 
   return (
@@ -511,15 +673,7 @@ function AppShellContent() {
             Offline mode: showing local data. Sync and AniList updates will resume automatically when connection returns.
           </div>
         )}
-        {screen === "library"    && <LibrarySurface key={`library:${surfaceRefreshKey}`} session={session} onNavigate={setScreen} onEntryEdited={scheduleAutoSync} />}
-        {screen === "discovery"  && <DiscoverySurface key={`discovery:${surfaceRefreshKey}`} />}
-        {screen === "activity"   && <ActivitySurface key={`activity:${surfaceRefreshKey}`} />}
-        {screen === "notifications" && <NotificationsSurface key={`notifications:${surfaceRefreshKey}`} />}
-        {screen === "search"     && <SearchSurface key={`search:${surfaceRefreshKey}`} onNavigate={setScreen} />}
-        {screen === "schedule"   && <ScheduleSurface key={`schedule:${surfaceRefreshKey}`} />}
-        {screen === "statistics" && <StatisticsSurface key={`statistics:${surfaceRefreshKey}`} />}
-        {screen === "settings"   && <SettingsSurface key={`settings:${surfaceRefreshKey}`} />}
-        {screen === "auth"       && <AuthSurface key={`auth:${surfaceRefreshKey}`} session={session} onAuthenticated={setSession} onLogout={handleLogout} />}
+        {renderActiveSurface()}
       </main>
 
       <SideSheetHost />

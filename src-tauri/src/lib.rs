@@ -190,6 +190,7 @@ pub fn run() {
             commands::get_database_overview,
             commands::prepare_auth_request,
             commands::get_anilist_config_status,
+            commands::get_online_status,
             commands::get_viewer,
             commands::toggle_media_favorite,
             commands::toggle_favorite,
