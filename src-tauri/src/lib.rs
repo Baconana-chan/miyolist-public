@@ -18,6 +18,7 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 #[cfg(desktop)]
 use tauri::{Manager, WindowEvent};
+#[cfg(desktop)]
 use tauri_plugin_notification::NotificationExt;
 
 #[cfg(desktop)]
@@ -91,6 +92,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            #[cfg(not(desktop))]
+            let _ = app;
             #[cfg(desktop)]
             {
                 let next_airing = next_airing_label(app.handle());
@@ -145,6 +148,8 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            #[cfg(not(desktop))]
+            let _ = (window, event);
             #[cfg(desktop)]
             {
                 if let WindowEvent::CloseRequested { api, .. } = event {

@@ -1183,6 +1183,7 @@ pub fn get_unnotified_aired(app: &AppHandle) -> Result<Vec<crate::models::Airing
 }
 
 /// Returns count of aired entries that are still unnotified.
+#[cfg(desktop)]
 pub fn get_unnotified_aired_count(app: &AppHandle) -> Result<i64, String> {
     initialize_database(app)?;
     let database_path = database_path(app)?;
@@ -1202,6 +1203,7 @@ pub fn get_unnotified_aired_count(app: &AppHandle) -> Result<i64, String> {
 }
 
 /// Reads a boolean app setting from `app_settings` by key.
+#[cfg(desktop)]
 pub fn get_bool_app_setting(app: &AppHandle, key: &str) -> Result<Option<bool>, String> {
     initialize_database(app)?;
     let database_path = database_path(app)?;
@@ -1220,6 +1222,7 @@ pub fn get_bool_app_setting(app: &AppHandle, key: &str) -> Result<Option<bool>, 
 }
 
 /// Persists a boolean app setting in `app_settings` by key.
+#[cfg(desktop)]
 pub fn set_bool_app_setting(app: &AppHandle, key: &str, value: bool) -> Result<(), String> {
     initialize_database(app)?;
     let database_path = database_path(app)?;

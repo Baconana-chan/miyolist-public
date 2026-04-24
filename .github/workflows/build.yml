@@ -263,13 +263,33 @@ jobs:
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.11902837
         run: bun tauri android build
 
+      - name: Sign Android APK
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          APK_IN="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-unsigned.apk"
+          APK_OUT="src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-signed.apk"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > miyolist.keystore
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" sign \
+            --ks miyolist.keystore \
+            --ks-key-alias "$ANDROID_KEY_ALIAS" \
+            --ks-pass pass:"$ANDROID_STORE_PASSWORD" \
+            --key-pass pass:"$ANDROID_KEY_PASSWORD" \
+            --out "$APK_OUT" \
+            "$APK_IN"
+          rm miyolist.keystore
+          echo "Signed APK: $APK_OUT"
+
       - name: Upload Android APK as workflow artifact
         uses: actions/upload-artifact@v6
         with:
           name: miyolist-Android-arm64
           retention-days: 14
           path: |
-            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release-signed.apk
 
   # ── Optional portable package (Windows) ───────────────────────────────────
   portable-windows:
