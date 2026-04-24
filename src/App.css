@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at top left, rgba(217, 116, 82, 0.28), transparent 35%),
+      radial-gradient(circle at top right, rgba(85, 122, 149, 0.22), transparent 30%),
+      #121314;
+    color: #f1efe7;
+    font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  button {
+    cursor: pointer;
+  }
+}
+
+@layer components {
+  @keyframes skeleton-shimmer {
+    0% {
+      background-position: -240px 0;
+    }
+    100% {
+      background-position: calc(240px + 100%) 0;
+    }
+  }
+
+  .skeleton-shimmer {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.05) 0%,
+      rgba(255, 255, 255, 0.12) 45%,
+      rgba(255, 255, 255, 0.05) 100%
+    );
+    background-size: 240px 100%;
+    animation: skeleton-shimmer 1.15s ease-in-out infinite;
+  }
+}
