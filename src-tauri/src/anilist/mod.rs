@@ -296,8 +296,8 @@ pub fn config_status() -> AniListConfigStatus {
 
 pub fn load_config() -> Result<AniListConfig, String> {
     let uses_env_file = dotenvy::dotenv().is_ok();
-    let client_id = env_or_build(VAR_CLIENT_ID, BUILD_CLIENT_ID)
-        .ok_or_else(|| missing_var(VAR_CLIENT_ID))?;
+    let client_id =
+        env_or_build(VAR_CLIENT_ID, BUILD_CLIENT_ID).ok_or_else(|| missing_var(VAR_CLIENT_ID))?;
     let client_secret = env_or_build(VAR_CLIENT_SECRET, BUILD_CLIENT_SECRET);
 
     Ok(AniListConfig {
@@ -1568,8 +1568,8 @@ pub fn store_access_token(
         return Err("Access token cannot be empty.".into());
     }
 
-    // Store in OS keyring; if unavailable also write to DB as fallback.
-    let keyring_ok = keyring_store(trimmed).is_ok();
+    // Store in OS keyring; if unavailable/unreadable also write to DB fallback.
+    let keyring_ok = keyring_roundtrip_ok(trimmed);
 
     let database_path = crate::db::database_path(app)?;
     let connection = crate::db::open_connection(&database_path)?;
@@ -1727,13 +1727,20 @@ fn missing_var(name: &str) -> String {
     format!("Missing required environment variable: {name}")
 }
 
+fn keyring_roundtrip_ok(token: &str) -> bool {
+    if keyring_store(token).is_err() {
+        return false;
+    }
+    matches!(keyring_read().as_deref(), Some(stored) if stored == token)
+}
+
 fn persist_oauth_session(
     app: &AppHandle,
     access_token: &str,
     expires_in: Option<i64>,
 ) -> Result<(), String> {
-    // Store in OS keyring; fall back to DB if unavailable.
-    let keyring_ok = keyring_store(access_token).is_ok();
+    // Store in OS keyring; fall back to DB if unavailable or unreadable.
+    let keyring_ok = keyring_roundtrip_ok(access_token);
     let db_token: Option<&str> = if keyring_ok { None } else { Some(access_token) };
 
     let database_path = crate::db::database_path(app)?;

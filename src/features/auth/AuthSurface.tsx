@@ -6,7 +6,13 @@ import {
   getAuthSessionStatus,
   clearAccessToken,
 } from "../../shared/api/auth";
-import { getFavorites, getFollowers, getFollowing, getUserProfile } from "../../shared/api/database";
+import {
+  getAuthCallbackStatus,
+  getFavorites,
+  getFollowers,
+  getFollowing,
+  getUserProfile,
+} from "../../shared/api/database";
 import type { AuthSessionStatus, SocialUser, UserFavorites, UserProfile } from "../../shared/types/app";
 import { CharacterPanel } from "../people/CharacterPanel";
 import { StaffPanel } from "../people/StaffPanel";
@@ -468,6 +474,20 @@ function LoginView({ onAuthenticated }: { onAuthenticated: (s: AuthSessionStatus
       // Poll every 2 s until the Rust callback listener stores the token
       pollRef.current = setInterval(async () => {
         try {
+          const callbackStatus = await getAuthCallbackStatus();
+          if (callbackStatus.startsWith("failed:")) {
+            stopPolling();
+            setPhase("error");
+            setError(callbackStatus.slice("failed:".length));
+            return;
+          }
+          if (callbackStatus === "timed_out") {
+            stopPolling();
+            setPhase("error");
+            setError("Sign-in timed out. Please try again.");
+            return;
+          }
+
           const status = await getAuthSessionStatus();
           if (status.hasAccessToken) {
             stopPolling();

@@ -223,7 +223,11 @@ fn handle_callback_connection(mut stream: TcpStream, app: &AppHandle) -> Result<
     } else {
         match handle_callback(app, &url) {
             Ok(message) => html_response("200 OK", "AniList login completed", &message),
-            Err(message) => html_response("400 Bad Request", "AniList login failed", &message),
+            Err(message) => {
+                *callback_listener_state().lock().unwrap() =
+                    CallbackListenerState::Failed(message.clone());
+                html_response("400 Bad Request", "AniList login failed", &message)
+            }
         }
     };
 

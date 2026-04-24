@@ -215,13 +215,19 @@ jobs:
         run: bun install
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Verify Android SDK tools are available
+        run: |
+          test -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          echo "Android SDK cmdline-tools found"
+
+      - name: Accept Android SDK licenses
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses
 
       - name: Install Android NDK and build tools
         run: |
@@ -246,16 +252,9 @@ jobs:
           restore-keys: android-cargo-v1-
 
       - name: Build Android APK
-        uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.11902837
-        with:
-          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
-          releaseName: "MiyoList ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || github.sha }}"
-          releaseDraft: true
-          prerelease: false
-          args: --target android --bundles apk
+        run: bun tauri android build
 
       - name: Upload Android APK as workflow artifact
         uses: actions/upload-artifact@v6
@@ -263,7 +262,7 @@ jobs:
           name: miyolist-Android-arm64
           retention-days: 14
           path: |
-            src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk
+            src-tauri/gen/android/app/build/outputs/apk/**/*.apk
 
   # ── Optional portable package (Windows) ───────────────────────────────────
   portable-windows:
