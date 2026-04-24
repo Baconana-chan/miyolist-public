@@ -1,7 +1,4 @@
-use std::{
-    fs,
-    path::PathBuf,
-};
+use std::{fs, path::PathBuf};
 
 use tauri::{AppHandle, Manager};
 
@@ -17,7 +14,7 @@ pub fn foundation_summary() -> crate::models::FoundationModule {
 
 fn image_cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let dir  = base.join("image_cache");
+    let dir = base.join("image_cache");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -31,14 +28,19 @@ fn url_to_filename(url: &str) -> String {
     let path_part = url.split('?').next().unwrap_or(url);
     let segment = path_part
         .split('/')
-        .filter(|s| !s.is_empty())
-        .last()
+        .rfind(|s| !s.is_empty())
         .unwrap_or("unknown");
 
     // Keep only safe characters; replace everything else with '_'.
     let safe: String = segment
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '.' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
 
     if safe.is_empty() {
@@ -67,13 +69,11 @@ pub fn image_cache_stats(app: &AppHandle) -> Result<(i64, i64), String> {
     let dir = image_cache_dir(app)?;
     let mut count = 0i64;
     let mut bytes = 0i64;
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-        if let Ok(e) = entry {
-            if let Ok(meta) = e.metadata() {
-                if meta.is_file() {
-                    count += 1;
-                    bytes += meta.len() as i64;
-                }
+    for e in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        if let Ok(meta) = e.metadata() {
+            if meta.is_file() {
+                count += 1;
+                bytes += meta.len() as i64;
             }
         }
     }
@@ -83,9 +83,9 @@ pub fn image_cache_stats(app: &AppHandle) -> Result<(i64, i64), String> {
 /// Returns the local filesystem path for a cached image, or `None` if the
 /// URL has not been cached yet.
 pub fn get_cached_image_path(app: &AppHandle, url: &str) -> Result<Option<String>, String> {
-    let dir      = image_cache_dir(app)?;
+    let dir = image_cache_dir(app)?;
     let filename = url_to_filename(url);
-    let path     = dir.join(&filename);
+    let path = dir.join(&filename);
     if path.exists() {
         Ok(Some(path.to_string_lossy().to_string()))
     } else {
@@ -98,9 +98,9 @@ pub fn get_cached_image_path(app: &AppHandle, url: &str) -> Result<Option<String
 /// the download is skipped and the existing path is returned.
 #[allow(dead_code)]
 pub fn cache_image(app: &AppHandle, url: &str) -> Result<String, String> {
-    let dir      = image_cache_dir(app)?;
+    let dir = image_cache_dir(app)?;
     let filename = url_to_filename(url);
-    let path     = dir.join(&filename);
+    let path = dir.join(&filename);
 
     if path.exists() {
         return Ok(path.to_string_lossy().to_string());
@@ -121,7 +121,7 @@ pub fn cache_image(app: &AppHandle, url: &str) -> Result<String, String> {
 /// that were newly downloaded.
 pub fn prefetch_library_covers(app: &AppHandle) -> Result<i64, String> {
     let urls = crate::db::get_all_cover_urls(app)?;
-    let dir  = image_cache_dir(app)?;
+    let dir = image_cache_dir(app)?;
     let mut downloaded = 0i64;
 
     for url in urls {
@@ -130,7 +130,7 @@ pub fn prefetch_library_covers(app: &AppHandle) -> Result<i64, String> {
         }
 
         let filename = url_to_filename(&url);
-        let path     = dir.join(&filename);
+        let path = dir.join(&filename);
         if path.exists() {
             continue;
         }
@@ -146,12 +146,10 @@ pub fn prefetch_library_covers(app: &AppHandle) -> Result<i64, String> {
 pub fn clear_image_cache(app: &AppHandle) -> Result<i64, String> {
     let dir = image_cache_dir(app)?;
     let mut removed = 0i64;
-    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
-        if let Ok(e) = entry {
-            if e.metadata().map(|m| m.is_file()).unwrap_or(false) {
-                let _ = fs::remove_file(e.path());
-                removed += 1;
-            }
+    for e in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        if e.metadata().map(|m| m.is_file()).unwrap_or(false) {
+            let _ = fs::remove_file(e.path());
+            removed += 1;
         }
     }
     Ok(removed)

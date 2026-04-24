@@ -52,7 +52,11 @@ fn update_tray_badge(app: &tauri::AppHandle) {
 
         #[cfg(not(target_os = "windows"))]
         {
-            let title = if count > 0 { count.to_string() } else { String::new() };
+            let title = if count > 0 {
+                count.to_string()
+            } else {
+                String::new()
+            };
             let _ = tray.set_title(Some(title));
         }
     }
@@ -72,7 +76,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let next_airing = next_airing_label(&app.handle());
+            let next_airing = next_airing_label(app.handle());
 
             let tray_menu = MenuBuilder::new(app)
                 .item(&MenuItemBuilder::with_id(TRAY_MENU_OPEN, "Open MiyoList").build(app)?)
@@ -118,7 +122,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            update_tray_badge(&app.handle());
+            update_tray_badge(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -128,7 +132,7 @@ pub fn run() {
                 }
 
                 let app = window.app_handle();
-                let should_minimize = crate::db::get_app_settings(&app)
+                let should_minimize = crate::db::get_app_settings(app)
                     .map(|s| s.minimize_to_tray_on_close)
                     .unwrap_or(false);
 
@@ -136,7 +140,7 @@ pub fn run() {
                     api.prevent_close();
                     let _ = window.hide();
 
-                    let already_shown = crate::db::get_bool_app_setting(&app, TRAY_NOTICE_SHOWN_KEY)
+                    let already_shown = crate::db::get_bool_app_setting(app, TRAY_NOTICE_SHOWN_KEY)
                         .ok()
                         .flatten()
                         .unwrap_or(false);
@@ -148,7 +152,7 @@ pub fn run() {
                             .title("MiyoList is still running")
                             .body("The app was minimized to the system tray. Use the tray icon to reopen it.")
                             .show();
-                        let _ = crate::db::set_bool_app_setting(&app, TRAY_NOTICE_SHOWN_KEY, true);
+                        let _ = crate::db::set_bool_app_setting(app, TRAY_NOTICE_SHOWN_KEY, true);
                     }
                 }
             }

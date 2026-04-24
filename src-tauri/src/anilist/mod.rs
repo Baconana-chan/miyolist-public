@@ -14,17 +14,11 @@ use serde_json::{json, Value};
 use tauri::AppHandle;
 
 use crate::models::{
-    AniListNotificationItem,
-    ActivityReplyItem,
-    AniListConfigStatus, AniListViewer, AuthSessionStatus,
-    CharacterDetails, CharacterMedia,
-    FavoriteMedia, FavoritePerson, FavoriteStudio, FoundationModule,
-    FollowingActivityItem,
-    GlobalAiringEntry,
-    PersonSearchResult, StaffCharacter, StaffDetails, StudioDetails, StudioMedia,
-    SocialUser,
-    StudioSearchResult, SyncSummary, UserFavorites, UserProfile, UserProfileStats, UserSearchResult,
-    UserMediaListItem,
+    ActivityReplyItem, AniListConfigStatus, AniListNotificationItem, AniListViewer,
+    AuthSessionStatus, CharacterDetails, CharacterMedia, FavoriteMedia, FavoritePerson,
+    FavoriteStudio, FollowingActivityItem, FoundationModule, GlobalAiringEntry, PersonSearchResult,
+    SocialUser, StaffCharacter, StaffDetails, StudioDetails, StudioMedia, StudioSearchResult,
+    SyncSummary, UserFavorites, UserMediaListItem, UserProfile, UserProfileStats, UserSearchResult,
 };
 
 const DEFAULT_AUTH_URL: &str = "https://anilist.co/api/v2/oauth/authorize";
@@ -119,7 +113,11 @@ fn rate_limit_acquire() {
     let now = Instant::now();
 
     // Evict timestamps older than the window.
-    while q.front().map(|t: &Instant| now.duration_since(*t) >= RATE_LIMIT_WINDOW).unwrap_or(false) {
+    while q
+        .front()
+        .map(|t: &Instant| now.duration_since(*t) >= RATE_LIMIT_WINDOW)
+        .unwrap_or(false)
+    {
         q.pop_front();
     }
 
@@ -132,7 +130,11 @@ fn rate_limit_acquire() {
             std::thread::sleep(wait);
             q = rate_limiter().lock().unwrap_or_else(|p| p.into_inner());
             let now2 = Instant::now();
-            while q.front().map(|t: &Instant| now2.duration_since(*t) >= RATE_LIMIT_WINDOW).unwrap_or(false) {
+            while q
+                .front()
+                .map(|t: &Instant| now2.duration_since(*t) >= RATE_LIMIT_WINDOW)
+                .unwrap_or(false)
+            {
                 q.pop_front();
             }
         }
@@ -168,14 +170,20 @@ fn graphql_post<T: serde::de::DeserializeOwned>(
         let status = response.status();
 
         if status.as_u16() == 429 {
-            last_err = format!("[RATE_LIMITED] AniList rate limit reached (attempt {})", attempt + 1);
+            last_err = format!(
+                "[RATE_LIMITED] AniList rate limit reached (attempt {})",
+                attempt + 1
+            );
             eprintln!("{last_err} — waiting 60s");
             std::thread::sleep(Duration::from_secs(60));
             continue;
         }
 
         if status.is_server_error() && attempt < MAX_RETRIES {
-            last_err = format!("[SERVER_ERROR] AniList returned HTTP {status} (attempt {})", attempt + 1);
+            last_err = format!(
+                "[SERVER_ERROR] AniList returned HTTP {status} (attempt {})",
+                attempt + 1
+            );
             eprintln!("{last_err} — retrying in {}s", 2u64.pow(attempt));
             std::thread::sleep(Duration::from_secs(2u64.pow(attempt)));
             continue;
@@ -183,7 +191,9 @@ fn graphql_post<T: serde::de::DeserializeOwned>(
 
         if !status.is_success() {
             let body_text = response.text().unwrap_or_default();
-            return Err(format!("[HTTP_ERROR] AniList returned HTTP {status}: {body_text}"));
+            return Err(format!(
+                "[HTTP_ERROR] AniList returned HTTP {status}: {body_text}"
+            ));
         }
 
         let parsed: GraphQlResponse<T> = response
@@ -191,16 +201,21 @@ fn graphql_post<T: serde::de::DeserializeOwned>(
             .map_err(|e| format!("[PARSE_ERROR] Failed to decode AniList response: {e}"))?;
 
         if let Some(errors) = parsed.errors {
-            let msg = errors.into_iter().map(|e| e.message).collect::<Vec<_>>().join("; ");
+            let msg = errors
+                .into_iter()
+                .map(|e| e.message)
+                .collect::<Vec<_>>()
+                .join("; ");
             return Err(format!("[GRAPHQL_ERROR] {msg}"));
         }
 
-        return parsed.data.ok_or_else(|| "[EMPTY_RESPONSE] AniList returned no data".to_string());
+        return parsed
+            .data
+            .ok_or_else(|| "[EMPTY_RESPONSE] AniList returned no data".to_string());
     }
 
     Err(last_err)
 }
-
 
 #[derive(Clone)]
 pub struct AniListConfig {
@@ -360,16 +375,16 @@ pub fn fetch_favorites(app: &AppHandle) -> Result<UserFavorites, String> {
     }"#;
 
     let per_page = 50i64;
-    let mut all_anime: Vec<FavoriteMedia>   = Vec::new();
-    let mut all_manga: Vec<FavoriteMedia>   = Vec::new();
-    let mut all_chars: Vec<FavoritePerson>  = Vec::new();
-    let mut all_staff: Vec<FavoritePerson>  = Vec::new();
+    let mut all_anime: Vec<FavoriteMedia> = Vec::new();
+    let mut all_manga: Vec<FavoriteMedia> = Vec::new();
+    let mut all_chars: Vec<FavoritePerson> = Vec::new();
+    let mut all_staff: Vec<FavoritePerson> = Vec::new();
     let mut all_studios: Vec<FavoriteStudio> = Vec::new();
 
-    let mut anime_done  = false;
-    let mut manga_done  = false;
-    let mut chars_done  = false;
-    let mut staff_done  = false;
+    let mut anime_done = false;
+    let mut manga_done = false;
+    let mut chars_done = false;
+    let mut staff_done = false;
     let mut studios_done = false;
 
     for page in 1i64..=20 {
@@ -393,7 +408,9 @@ pub fn fetch_favorites(app: &AppHandle) -> Result<UserFavorites, String> {
                 title: n.title.english.or(n.title.romaji).unwrap_or_default(),
                 cover_image: n.cover_image.and_then(|c| c.large),
             }));
-            if !pi { anime_done = true; }
+            if !pi {
+                anime_done = true;
+            }
         }
         if !manga_done {
             let pi = fav.manga.page_info.has_next_page;
@@ -402,7 +419,9 @@ pub fn fetch_favorites(app: &AppHandle) -> Result<UserFavorites, String> {
                 title: n.title.english.or(n.title.romaji).unwrap_or_default(),
                 cover_image: n.cover_image.and_then(|c| c.large),
             }));
-            if !pi { manga_done = true; }
+            if !pi {
+                manga_done = true;
+            }
         }
         if !chars_done {
             let pi = fav.characters.page_info.has_next_page;
@@ -411,7 +430,9 @@ pub fn fetch_favorites(app: &AppHandle) -> Result<UserFavorites, String> {
                 name: n.name.full.unwrap_or_default(),
                 image: n.image.and_then(|i| i.large),
             }));
-            if !pi { chars_done = true; }
+            if !pi {
+                chars_done = true;
+            }
         }
         if !staff_done {
             let pi = fav.staff.page_info.has_next_page;
@@ -420,7 +441,9 @@ pub fn fetch_favorites(app: &AppHandle) -> Result<UserFavorites, String> {
                 name: n.name.full.unwrap_or_default(),
                 image: n.image.and_then(|i| i.large),
             }));
-            if !pi { staff_done = true; }
+            if !pi {
+                staff_done = true;
+            }
         }
         if !studios_done {
             let pi = fav.studios.page_info.has_next_page;
@@ -429,7 +452,9 @@ pub fn fetch_favorites(app: &AppHandle) -> Result<UserFavorites, String> {
                 name: n.name,
                 is_animation_studio: n.is_animation_studio,
             }));
-            if !pi { studios_done = true; }
+            if !pi {
+                studios_done = true;
+            }
         }
     }
 
@@ -442,7 +467,11 @@ pub fn fetch_favorites(app: &AppHandle) -> Result<UserFavorites, String> {
     })
 }
 
-pub fn toggle_media_favorite(app: &AppHandle, media_id: i64, media_type: &str) -> Result<bool, String> {
+pub fn toggle_media_favorite(
+    app: &AppHandle,
+    media_id: i64,
+    media_type: &str,
+) -> Result<bool, String> {
     toggle_favorite(app, media_id, media_type)
 }
 
@@ -476,7 +505,11 @@ pub fn toggle_favorite(app: &AppHandle, target_id: i64, target_type: &str) -> Re
         "CHARACTER" => variables["characterId"] = json!(target_id),
         "STAFF" => variables["staffId"] = json!(target_id),
         "STUDIO" => variables["studioId"] = json!(target_id),
-        other => return Err(format!("[TOGGLE_FAVORITE_INVALID_TYPE] Unsupported favorite type: {other}")),
+        other => {
+            return Err(format!(
+                "[TOGGLE_FAVORITE_INVALID_TYPE] Unsupported favorite type: {other}"
+            ))
+        }
     }
 
     let payload: ToggleFavouritePayload = graphql_post(
@@ -539,12 +572,20 @@ pub fn fetch_character_details(app: &AppHandle, id: i64) -> Result<CharacterDeta
         age: c.age,
         date_of_birth: c.date_of_birth.and_then(|d| d.to_iso_date()),
         favourites: c.favourites,
-        media: c.media.map(|m| m.nodes.into_iter().map(|n| CharacterMedia {
-            id: n.id,
-            title: n.title.english.or(n.title.romaji).unwrap_or_default(),
-            cover_image: n.cover_image.and_then(|ci| ci.large),
-            format: n.format,
-        }).collect()).unwrap_or_default(),
+        media: c
+            .media
+            .map(|m| {
+                m.nodes
+                    .into_iter()
+                    .map(|n| CharacterMedia {
+                        id: n.id,
+                        title: n.title.english.or(n.title.romaji).unwrap_or_default(),
+                        cover_image: n.cover_image.and_then(|ci| ci.large),
+                        format: n.format,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
 }
 
@@ -587,11 +628,19 @@ pub fn fetch_staff_details(app: &AppHandle, id: i64) -> Result<StaffDetails, Str
         date_of_birth: s.date_of_birth.and_then(|d| d.to_iso_date()),
         date_of_death: s.date_of_death.and_then(|d| d.to_iso_date()),
         favourites: s.favourites,
-        characters: s.characters.map(|conn| conn.nodes.into_iter().map(|n| StaffCharacter {
-            id: n.id,
-            name: n.name.full.unwrap_or_default(),
-            image: n.image.and_then(|i| i.large),
-        }).collect()).unwrap_or_default(),
+        characters: s
+            .characters
+            .map(|conn| {
+                conn.nodes
+                    .into_iter()
+                    .map(|n| StaffCharacter {
+                        id: n.id,
+                        name: n.name.full.unwrap_or_default(),
+                        image: n.image.and_then(|i| i.large),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
 }
 
@@ -623,13 +672,21 @@ pub fn fetch_studio_details(app: &AppHandle, id: i64) -> Result<StudioDetails, S
         is_animation_studio: st.is_animation_studio,
         favourites: st.favourites,
         site_url: st.site_url,
-        media: st.media.map(|m| m.nodes.into_iter().map(|n| StudioMedia {
-            id: n.id,
-            title: n.title.english.or(n.title.romaji).unwrap_or_default(),
-            cover_image: n.cover_image.and_then(|ci| ci.large),
-            format: n.format,
-            status: n.status,
-        }).collect()).unwrap_or_default(),
+        media: st
+            .media
+            .map(|m| {
+                m.nodes
+                    .into_iter()
+                    .map(|n| StudioMedia {
+                        id: n.id,
+                        title: n.title.english.or(n.title.romaji).unwrap_or_default(),
+                        cover_image: n.cover_image.and_then(|ci| ci.large),
+                        format: n.format,
+                        status: n.status,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
 }
 
@@ -660,15 +717,21 @@ pub fn fetch_user_profile(app: &AppHandle, name: &str) -> Result<UserProfile, St
     let u = payload.user;
     let stats = u.statistics.map(|s| UserProfileStats {
         anime_count: s.anime.as_ref().map(|a| a.count).unwrap_or(0),
-        episodes_watched: s.anime.as_ref().and_then(|a| a.episodes_watched).unwrap_or(0),
+        episodes_watched: s
+            .anime
+            .as_ref()
+            .and_then(|a| a.episodes_watched)
+            .unwrap_or(0),
         anime_mean_score: s.anime.as_ref().and_then(|a| a.mean_score),
         manga_count: s.manga.as_ref().map(|m| m.count).unwrap_or(0),
         chapters_read: s.manga.as_ref().and_then(|m| m.chapters_read).unwrap_or(0),
         manga_mean_score: s.manga.as_ref().and_then(|m| m.mean_score),
     });
 
-    let following_count = fetch_social_count(&config.graphql_url, &access_token, u.id, true).unwrap_or(0);
-    let followers_count = fetch_social_count(&config.graphql_url, &access_token, u.id, false).unwrap_or(0);
+    let following_count =
+        fetch_social_count(&config.graphql_url, &access_token, u.id, true).unwrap_or(0);
+    let followers_count =
+        fetch_social_count(&config.graphql_url, &access_token, u.id, false).unwrap_or(0);
 
     Ok(UserProfile {
         id: u.id,
@@ -710,7 +773,11 @@ fn fetch_social_count(
     let mut count: i64 = 0;
 
     loop {
-        let query = if following { FOLLOWING_QUERY } else { FOLLOWERS_QUERY };
+        let query = if following {
+            FOLLOWING_QUERY
+        } else {
+            FOLLOWERS_QUERY
+        };
         let payload: FollowUsersPayload = graphql_post(
             graphql_url,
             access_token,
@@ -722,9 +789,19 @@ fn fetch_social_count(
         }
 
         let page_count = if following {
-            payload.page.following.as_ref().map(|items| items.len() as i64).unwrap_or(0)
+            payload
+                .page
+                .following
+                .as_ref()
+                .map(|items| items.len() as i64)
+                .unwrap_or(0)
         } else {
-            payload.page.followers.as_ref().map(|items| items.len() as i64).unwrap_or(0)
+            payload
+                .page
+                .followers
+                .as_ref()
+                .map(|items| items.len() as i64)
+                .unwrap_or(0)
         };
         count += page_count;
 
@@ -768,14 +845,21 @@ pub fn search_characters(app: &AppHandle, query: &str) -> Result<Vec<PersonSearc
     )
     .map_err(|e| format!("[CHAR_SEARCH_FAILED] {e}"))?;
 
-    Ok(payload.page.characters.into_iter().map(|c| PersonSearchResult {
-        id: c.id,
-        kind: "CHARACTER".into(),
-        name: c.name.full.unwrap_or_default(),
-        image: c.image.and_then(|i| i.large),
-        sub: c.media.and_then(|m| m.nodes.into_iter().next())
-            .and_then(|m| m.title.english.or(m.title.romaji)),
-    }).collect())
+    Ok(payload
+        .page
+        .characters
+        .into_iter()
+        .map(|c| PersonSearchResult {
+            id: c.id,
+            kind: "CHARACTER".into(),
+            name: c.name.full.unwrap_or_default(),
+            image: c.image.and_then(|i| i.large),
+            sub: c
+                .media
+                .and_then(|m| m.nodes.into_iter().next())
+                .and_then(|m| m.title.english.or(m.title.romaji)),
+        })
+        .collect())
 }
 
 pub fn search_staff(app: &AppHandle, query: &str) -> Result<Vec<PersonSearchResult>, String> {
@@ -799,13 +883,18 @@ pub fn search_staff(app: &AppHandle, query: &str) -> Result<Vec<PersonSearchResu
     )
     .map_err(|e| format!("[STAFF_SEARCH_FAILED] {e}"))?;
 
-    Ok(payload.page.staff.into_iter().map(|s| PersonSearchResult {
-        id: s.id,
-        kind: "STAFF".into(),
-        name: s.name.full.unwrap_or_default(),
-        image: s.image.and_then(|i| i.large),
-        sub: s.primary_occupations.and_then(|o| o.into_iter().next()),
-    }).collect())
+    Ok(payload
+        .page
+        .staff
+        .into_iter()
+        .map(|s| PersonSearchResult {
+            id: s.id,
+            kind: "STAFF".into(),
+            name: s.name.full.unwrap_or_default(),
+            image: s.image.and_then(|i| i.large),
+            sub: s.primary_occupations.and_then(|o| o.into_iter().next()),
+        })
+        .collect())
 }
 
 pub fn search_studios(app: &AppHandle, query: &str) -> Result<Vec<StudioSearchResult>, String> {
@@ -829,13 +918,20 @@ pub fn search_studios(app: &AppHandle, query: &str) -> Result<Vec<StudioSearchRe
     )
     .map_err(|e| format!("[STUDIO_SEARCH_FAILED] {e}"))?;
 
-    Ok(payload.page.studios.into_iter().map(|s| StudioSearchResult {
-        id: s.id,
-        name: s.name,
-        is_animation_studio: s.is_animation_studio,
-        recent_title: s.media.and_then(|m| m.nodes.into_iter().next())
-            .and_then(|m| m.title.english.or(m.title.romaji)),
-    }).collect())
+    Ok(payload
+        .page
+        .studios
+        .into_iter()
+        .map(|s| StudioSearchResult {
+            id: s.id,
+            name: s.name,
+            is_animation_studio: s.is_animation_studio,
+            recent_title: s
+                .media
+                .and_then(|m| m.nodes.into_iter().next())
+                .and_then(|m| m.title.english.or(m.title.romaji)),
+        })
+        .collect())
 }
 
 pub fn search_users(app: &AppHandle, query: &str) -> Result<Vec<UserSearchResult>, String> {
@@ -858,57 +954,62 @@ pub fn search_users(app: &AppHandle, query: &str) -> Result<Vec<UserSearchResult
     )
     .map_err(|e| format!("[USER_SEARCH_FAILED] {e}"))?;
 
-    Ok(payload.page.users.into_iter().map(|u| UserSearchResult {
-        id: u.id,
-        name: u.name,
-        avatar_url: u.avatar.and_then(|a| a.large),
-    }).collect())
+    Ok(payload
+        .page
+        .users
+        .into_iter()
+        .map(|u| UserSearchResult {
+            id: u.id,
+            name: u.name,
+            avatar_url: u.avatar.and_then(|a| a.large),
+        })
+        .collect())
 }
 
 pub fn toggle_follow(app: &AppHandle, user_id: i64, follow: bool) -> Result<bool, String> {
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        // Avoid accidental state flips: only call ToggleFollow when a transition is needed.
-        const STATE_QUERY: &str = r#"
+    // Avoid accidental state flips: only call ToggleFollow when a transition is needed.
+    const STATE_QUERY: &str = r#"
         query FollowState($userId: Int!) {
             User(id: $userId) { isFollowing }
         }"#;
-        let state_payload: UserProfilePayload = graphql_post(
-                &config.graphql_url,
-                &access_token,
-                &json!({ "query": STATE_QUERY, "variables": { "userId": user_id } }),
-        )
-        .map_err(|e| format!("[FOLLOW_STATE_FETCH_FAILED] {e}"))?;
+    let state_payload: UserProfilePayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": STATE_QUERY, "variables": { "userId": user_id } }),
+    )
+    .map_err(|e| format!("[FOLLOW_STATE_FETCH_FAILED] {e}"))?;
 
-        let is_following_now = state_payload.user.is_following.unwrap_or(false);
-        if is_following_now == follow {
-                return Ok(is_following_now);
-        }
+    let is_following_now = state_payload.user.is_following.unwrap_or(false);
+    if is_following_now == follow {
+        return Ok(is_following_now);
+    }
 
-        const MUTATION: &str = r#"
+    const MUTATION: &str = r#"
         mutation ToggleFollow($userId: Int!) {
             ToggleFollow(userId: $userId) { isFollowing }
         }"#;
 
-        let payload: ToggleFollowPayload = graphql_post(
-                &config.graphql_url,
-                &access_token,
-                &json!({ "query": MUTATION, "variables": { "userId": user_id } }),
-        )
-        .map_err(|e| format!("[TOGGLE_FOLLOW_FAILED] {e}"))?;
+    let payload: ToggleFollowPayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": MUTATION, "variables": { "userId": user_id } }),
+    )
+    .map_err(|e| format!("[TOGGLE_FOLLOW_FAILED] {e}"))?;
 
-        Ok(payload
-                .toggle_follow
-                .and_then(|t| t.is_following)
-                .unwrap_or(follow))
+    Ok(payload
+        .toggle_follow
+        .and_then(|t| t.is_following)
+        .unwrap_or(follow))
 }
 
 pub fn get_following(app: &AppHandle, user_id: i64, page: i64) -> Result<Vec<SocialUser>, String> {
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        const QUERY: &str = r#"
+    const QUERY: &str = r#"
         query GetFollowing($userId: Int!, $page: Int, $perPage: Int) {
             Page(page: $page, perPage: $perPage) {
                 following(userId: $userId) {
@@ -921,33 +1022,33 @@ pub fn get_following(app: &AppHandle, user_id: i64, page: i64) -> Result<Vec<Soc
             }
         }"#;
 
-        let payload: FollowUsersPayload = graphql_post(
-                &config.graphql_url,
-                &access_token,
-                &json!({ "query": QUERY, "variables": { "userId": user_id, "page": page, "perPage": 50 } }),
-        )
-        .map_err(|e| format!("[FOLLOWING_FETCH_FAILED] {e}"))?;
+    let payload: FollowUsersPayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": QUERY, "variables": { "userId": user_id, "page": page, "perPage": 50 } }),
+    )
+    .map_err(|e| format!("[FOLLOWING_FETCH_FAILED] {e}"))?;
 
-        Ok(payload
-                .page
-                .following
-                .unwrap_or_default()
-                .into_iter()
-                .map(|u| SocialUser {
-                        id: u.id,
-                        name: u.name,
-                        avatar_url: u.avatar.and_then(|a| a.large),
-                        is_following: u.is_following.unwrap_or(false),
-                        is_follower: u.is_follower.unwrap_or(false),
-                })
-                .collect())
+    Ok(payload
+        .page
+        .following
+        .unwrap_or_default()
+        .into_iter()
+        .map(|u| SocialUser {
+            id: u.id,
+            name: u.name,
+            avatar_url: u.avatar.and_then(|a| a.large),
+            is_following: u.is_following.unwrap_or(false),
+            is_follower: u.is_follower.unwrap_or(false),
+        })
+        .collect())
 }
 
 pub fn get_followers(app: &AppHandle, user_id: i64, page: i64) -> Result<Vec<SocialUser>, String> {
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        const QUERY: &str = r#"
+    const QUERY: &str = r#"
         query GetFollowers($userId: Int!, $page: Int, $perPage: Int) {
             Page(page: $page, perPage: $perPage) {
                 followers(userId: $userId) {
@@ -960,111 +1061,115 @@ pub fn get_followers(app: &AppHandle, user_id: i64, page: i64) -> Result<Vec<Soc
             }
         }"#;
 
-        let payload: FollowUsersPayload = graphql_post(
-                &config.graphql_url,
-                &access_token,
-                &json!({ "query": QUERY, "variables": { "userId": user_id, "page": page, "perPage": 50 } }),
-        )
-        .map_err(|e| format!("[FOLLOWERS_FETCH_FAILED] {e}"))?;
+    let payload: FollowUsersPayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": QUERY, "variables": { "userId": user_id, "page": page, "perPage": 50 } }),
+    )
+    .map_err(|e| format!("[FOLLOWERS_FETCH_FAILED] {e}"))?;
 
-        Ok(payload
-                .page
-                .followers
-                .unwrap_or_default()
-                .into_iter()
-                .map(|u| SocialUser {
-                        id: u.id,
-                        name: u.name,
-                        avatar_url: u.avatar.and_then(|a| a.large),
-                        is_following: u.is_following.unwrap_or(false),
-                        is_follower: u.is_follower.unwrap_or(false),
-                })
-                .collect())
+    Ok(payload
+        .page
+        .followers
+        .unwrap_or_default()
+        .into_iter()
+        .map(|u| SocialUser {
+            id: u.id,
+            name: u.name,
+            avatar_url: u.avatar.and_then(|a| a.large),
+            is_following: u.is_following.unwrap_or(false),
+            is_follower: u.is_follower.unwrap_or(false),
+        })
+        .collect())
 }
 
 fn map_activity_node(a: FollowingActivityNode) -> FollowingActivityItem {
-        let user = a.user.or(a.messenger).unwrap_or(ActivityUserNode {
+    let user = a.user.or(a.messenger).unwrap_or(ActivityUserNode {
+        id: 0,
+        name: "Unknown".to_string(),
+        avatar: None,
+    });
+    let (media_id, media_title, media_cover_image, activity_type) = if let Some(m) = a.media {
+        (
+            Some(m.id),
+            m.title.english.or(m.title.romaji),
+            m.cover_image.and_then(|ci| ci.large),
+            if a.typename == "ListActivity" {
+                if m.media_type.as_deref() == Some("MANGA") {
+                    "MANGA_LIST".to_string()
+                } else {
+                    "ANIME_LIST".to_string()
+                }
+            } else {
+                "TEXT".to_string()
+            },
+        )
+    } else {
+        (
+            None,
+            None,
+            None,
+            if a.typename == "TextActivity" || a.typename == "MessageActivity" {
+                "TEXT".to_string()
+            } else {
+                "ANIME_LIST".to_string()
+            },
+        )
+    };
+
+    let replies = a
+        .replies
+        .unwrap_or_default()
+        .into_iter()
+        .map(|reply| {
+            let user = reply.user.unwrap_or(ActivityUserNode {
                 id: 0,
                 name: "Unknown".to_string(),
                 avatar: None,
-        });
-        let (media_id, media_title, media_cover_image, activity_type) = if let Some(m) = a.media {
-                (
-                        Some(m.id),
-                        m.title.english.or(m.title.romaji),
-                        m.cover_image.and_then(|ci| ci.large),
-                        if a.typename == "ListActivity" {
-                                if m.media_type.as_deref() == Some("MANGA") {
-                                        "MANGA_LIST".to_string()
-                                } else {
-                                        "ANIME_LIST".to_string()
-                                }
-                        } else {
-                                "TEXT".to_string()
-                        },
-                )
-        } else {
-                (
-                        None,
-                        None,
-                        None,
-                        if a.typename == "TextActivity" || a.typename == "MessageActivity" {
-                                "TEXT".to_string()
-                        } else {
-                                "ANIME_LIST".to_string()
-                        },
-                )
-        };
-
-        let replies = a
-                .replies
-                .unwrap_or_default()
-                .into_iter()
-                .map(|reply| {
-                        let user = reply.user.unwrap_or(ActivityUserNode {
-                                id: 0,
-                                name: "Unknown".to_string(),
-                                avatar: None,
-                        });
-                        ActivityReplyItem {
-                                id: reply.id,
-                                created_at: reply.created_at.unwrap_or(0),
-                                like_count: reply.like_count.unwrap_or(0),
-                                is_liked: reply.is_liked.unwrap_or(false),
-                                user_id: user.id,
-                                user_name: user.name,
-                                user_avatar: user.avatar.and_then(|a| a.large),
-                                text: reply.text,
-                        }
-                })
-                .collect();
-
-        FollowingActivityItem {
-                id: a.id,
-                activity_type,
-                created_at: a.created_at,
-                like_count: a.like_count.unwrap_or(0),
-                reply_count: a.reply_count.unwrap_or(0),
-                is_liked: a.is_liked.unwrap_or(false),
-                is_message: a.typename == "MessageActivity",
+            });
+            ActivityReplyItem {
+                id: reply.id,
+                created_at: reply.created_at.unwrap_or(0),
+                like_count: reply.like_count.unwrap_or(0),
+                is_liked: reply.is_liked.unwrap_or(false),
                 user_id: user.id,
                 user_name: user.name,
-                user_avatar: user.avatar.and_then(|av| av.large),
-                text: a.text.or(a.message),
-                status: a.status,
-                progress: a.progress,
-                media_id,
-                media_title,
-                media_cover_image,
-                replies,
-        }
+                user_avatar: user.avatar.and_then(|a| a.large),
+                text: reply.text,
+            }
+        })
+        .collect();
+
+    FollowingActivityItem {
+        id: a.id,
+        activity_type,
+        created_at: a.created_at,
+        like_count: a.like_count.unwrap_or(0),
+        reply_count: a.reply_count.unwrap_or(0),
+        is_liked: a.is_liked.unwrap_or(false),
+        is_message: a.typename == "MessageActivity",
+        user_id: user.id,
+        user_name: user.name,
+        user_avatar: user.avatar.and_then(|av| av.large),
+        text: a.text.or(a.message),
+        status: a.status,
+        progress: a.progress,
+        media_id,
+        media_title,
+        media_cover_image,
+        replies,
+    }
 }
 
-pub fn get_following_activity(app: &AppHandle, page: i64, per_page: i64) -> Result<Vec<FollowingActivityItem>, String> {
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
+pub fn get_following_activity(
+    app: &AppHandle,
+    page: i64,
+    per_page: i64,
+) -> Result<Vec<FollowingActivityItem>, String> {
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        const QUERY: &str = r#"
+    const QUERY: &str = r#"
         query FollowingActivity($page: Int, $perPage: Int) {
             Page(page: $page, perPage: $perPage) {
                 activities(isFollowing: true, sort: ID_DESC, type_in: [TEXT, ANIME_LIST, MANGA_LIST, MESSAGE]) {
@@ -1129,21 +1234,30 @@ pub fn get_following_activity(app: &AppHandle, page: i64, per_page: i64) -> Resu
             }
         }"#;
 
-        let payload: FollowingActivityPayload = graphql_post(
-                &config.graphql_url,
-                &access_token,
-                &json!({ "query": QUERY, "variables": { "page": page, "perPage": per_page } }),
-        )
-        .map_err(|e| format!("[FOLLOWING_ACTIVITY_FETCH_FAILED] {e}"))?;
+    let payload: FollowingActivityPayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": QUERY, "variables": { "page": page, "perPage": per_page } }),
+    )
+    .map_err(|e| format!("[FOLLOWING_ACTIVITY_FETCH_FAILED] {e}"))?;
 
-        Ok(payload.page.activities.into_iter().map(map_activity_node).collect())
+    Ok(payload
+        .page
+        .activities
+        .into_iter()
+        .map(map_activity_node)
+        .collect())
 }
 
-pub fn get_global_activity(app: &AppHandle, page: i64, per_page: i64) -> Result<Vec<FollowingActivityItem>, String> {
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
+pub fn get_global_activity(
+    app: &AppHandle,
+    page: i64,
+    per_page: i64,
+) -> Result<Vec<FollowingActivityItem>, String> {
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        const QUERY: &str = r#"
+    const QUERY: &str = r#"
         query GlobalActivity($page: Int, $perPage: Int) {
             Page(page: $page, perPage: $perPage) {
                 activities(sort: ID_DESC, type_in: [TEXT, ANIME_LIST, MANGA_LIST, MESSAGE]) {
@@ -1208,25 +1322,30 @@ pub fn get_global_activity(app: &AppHandle, page: i64, per_page: i64) -> Result<
             }
         }"#;
 
-        let payload: FollowingActivityPayload = graphql_post(
-                &config.graphql_url,
-                &access_token,
-                &json!({ "query": QUERY, "variables": { "page": page, "perPage": per_page } }),
-        )
-        .map_err(|e| format!("[GLOBAL_ACTIVITY_FETCH_FAILED] {e}"))?;
+    let payload: FollowingActivityPayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": QUERY, "variables": { "page": page, "perPage": per_page } }),
+    )
+    .map_err(|e| format!("[GLOBAL_ACTIVITY_FETCH_FAILED] {e}"))?;
 
-        Ok(payload.page.activities.into_iter().map(map_activity_node).collect())
+    Ok(payload
+        .page
+        .activities
+        .into_iter()
+        .map(map_activity_node)
+        .collect())
 }
 
 pub fn get_user_media_list(
-        app: &AppHandle,
-        user_id: i64,
-        media_type: &str,
+    app: &AppHandle,
+    user_id: i64,
+    media_type: &str,
 ) -> Result<Vec<UserMediaListItem>, String> {
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        const QUERY: &str = r#"
+    const QUERY: &str = r#"
         query UserMediaList($userId: Int, $type: MediaType) {
             MediaListCollection(userId: $userId, type: $type) {
                 lists {
@@ -1247,69 +1366,73 @@ pub fn get_user_media_list(
             }
         }"#;
 
-        let payload: UserMediaListPayload = graphql_post(
-                &config.graphql_url,
-                &access_token,
-                &json!({ "query": QUERY, "variables": { "userId": user_id, "type": media_type } }),
-        )
-        .map_err(|e| format!("[USER_MEDIA_LIST_FETCH_FAILED] {e}"))?;
+    let payload: UserMediaListPayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": QUERY, "variables": { "userId": user_id, "type": media_type } }),
+    )
+    .map_err(|e| format!("[USER_MEDIA_LIST_FETCH_FAILED] {e}"))?;
 
-        let mut out = Vec::new();
-        for list in payload
-                .media_list_collection
-                .map(|c| c.lists)
-                .unwrap_or_default()
-        {
-                for entry in list.entries {
-                        if let Some(media) = entry.media {
-                                out.push(UserMediaListItem {
-                                        media_id: media.id,
-                                        media_type: media.media_type,
-                                        title: media.title.english.or(media.title.romaji).unwrap_or_else(|| media.id.to_string()),
-                                        cover_image: media.cover_image.and_then(|ci| ci.large),
-                                        status: entry.status.unwrap_or_else(|| "PLANNING".to_string()),
-                                        score: entry.score,
-                                        progress: entry.progress.unwrap_or(0),
-                                        progress_volumes: entry.progress_volumes.unwrap_or(0),
-                                        updated_at: entry.updated_at.unwrap_or(0),
-                                });
-                        }
-                }
+    let mut out = Vec::new();
+    for list in payload
+        .media_list_collection
+        .map(|c| c.lists)
+        .unwrap_or_default()
+    {
+        for entry in list.entries {
+            if let Some(media) = entry.media {
+                out.push(UserMediaListItem {
+                    media_id: media.id,
+                    media_type: media.media_type,
+                    title: media
+                        .title
+                        .english
+                        .or(media.title.romaji)
+                        .unwrap_or_else(|| media.id.to_string()),
+                    cover_image: media.cover_image.and_then(|ci| ci.large),
+                    status: entry.status.unwrap_or_else(|| "PLANNING".to_string()),
+                    score: entry.score,
+                    progress: entry.progress.unwrap_or(0),
+                    progress_volumes: entry.progress_volumes.unwrap_or(0),
+                    updated_at: entry.updated_at.unwrap_or(0),
+                });
+            }
         }
+    }
 
-        out.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-        Ok(out)
+    out.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
+    Ok(out)
 }
 
 pub fn post_activity(app: &AppHandle, text: &str) -> Result<i64, String> {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-                return Err("Activity text cannot be empty.".into());
-        }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("Activity text cannot be empty.".into());
+    }
 
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        const MUTATION: &str = r#"
+    const MUTATION: &str = r#"
         mutation SaveTextActivity($text: String) {
             SaveTextActivity(text: $text) { id text createdAt }
         }"#;
 
-        let payload: SaveTextActivityPayload = graphql_post(
-                &config.graphql_url,
-                &access_token,
-                &json!({ "query": MUTATION, "variables": { "text": trimmed } }),
-        )
-        .map_err(|e| format!("[POST_ACTIVITY_FAILED] {e}"))?;
+    let payload: SaveTextActivityPayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": MUTATION, "variables": { "text": trimmed } }),
+    )
+    .map_err(|e| format!("[POST_ACTIVITY_FAILED] {e}"))?;
 
-        Ok(payload.save_text_activity.id)
+    Ok(payload.save_text_activity.id)
 }
 
-    pub fn toggle_activity_like(app: &AppHandle, activity_id: i64) -> Result<bool, String> {
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
+pub fn toggle_activity_like(app: &AppHandle, activity_id: i64) -> Result<bool, String> {
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        const MUTATION: &str = r#"
+    const MUTATION: &str = r#"
         mutation ToggleActivityLike($activityId: Int!) {
             ToggleLikeV2(id: $activityId, type: ACTIVITY) {
             ... on ListActivity { id likeCount isLiked }
@@ -1318,41 +1441,41 @@ pub fn post_activity(app: &AppHandle, text: &str) -> Result<i64, String> {
             }
         }"#;
 
-        let payload: ToggleLikePayload = graphql_post(
-            &config.graphql_url,
-            &access_token,
-            &json!({ "query": MUTATION, "variables": { "activityId": activity_id } }),
-        )
-        .map_err(|e| format!("[TOGGLE_ACTIVITY_LIKE_FAILED] {e}"))?;
+    let payload: ToggleLikePayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": MUTATION, "variables": { "activityId": activity_id } }),
+    )
+    .map_err(|e| format!("[TOGGLE_ACTIVITY_LIKE_FAILED] {e}"))?;
 
-        Ok(payload.toggle_like_v2.is_liked)
+    Ok(payload.toggle_like_v2.is_liked)
+}
+
+pub fn save_activity_reply(app: &AppHandle, activity_id: i64, text: &str) -> Result<i64, String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return Err("Reply text cannot be empty.".into());
     }
 
-    pub fn save_activity_reply(app: &AppHandle, activity_id: i64, text: &str) -> Result<i64, String> {
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            return Err("Reply text cannot be empty.".into());
-        }
+    let config = load_config()?;
+    let access_token = read_access_token(app)?;
 
-        let config = load_config()?;
-        let access_token = read_access_token(app)?;
-
-        const MUTATION: &str = r#"
+    const MUTATION: &str = r#"
         mutation SaveActivityReply($activityId: Int!, $text: String!) {
             SaveActivityReply(activityId: $activityId, text: $text) {
             id
             }
         }"#;
 
-        let payload: SaveActivityReplyPayload = graphql_post(
-            &config.graphql_url,
-            &access_token,
-            &json!({ "query": MUTATION, "variables": { "activityId": activity_id, "text": trimmed } }),
-        )
-        .map_err(|e| format!("[SAVE_ACTIVITY_REPLY_FAILED] {e}"))?;
+    let payload: SaveActivityReplyPayload = graphql_post(
+        &config.graphql_url,
+        &access_token,
+        &json!({ "query": MUTATION, "variables": { "activityId": activity_id, "text": trimmed } }),
+    )
+    .map_err(|e| format!("[SAVE_ACTIVITY_REPLY_FAILED] {e}"))?;
 
-        Ok(payload.save_activity_reply.id)
-    }
+    Ok(payload.save_activity_reply.id)
+}
 
 pub fn get_auth_session_status(app: &AppHandle) -> Result<AuthSessionStatus, String> {
     crate::db::initialize_database(app)?;
@@ -1390,8 +1513,8 @@ pub fn get_auth_session_status(app: &AppHandle) -> Result<AuthSessionStatus, Str
         session.unwrap_or((None, None, None, false, None));
 
     // Token exists if it's in the keyring OR in the DB column.
-    let has_access_token = keyring_read().is_some()
-        || db_token.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
+    let has_access_token =
+        keyring_read().is_some() || db_token.as_ref().map(|t| !t.is_empty()).unwrap_or(false);
 
     let profile = if let Some(id) = viewer_id {
         connection
@@ -1419,7 +1542,10 @@ pub fn get_auth_session_status(app: &AppHandle) -> Result<AuthSessionStatus, Str
     })
 }
 
-pub fn store_access_token(app: &AppHandle, access_token: &str) -> Result<AuthSessionStatus, String> {
+pub fn store_access_token(
+    app: &AppHandle,
+    access_token: &str,
+) -> Result<AuthSessionStatus, String> {
     crate::db::initialize_database(app)?;
 
     let trimmed = access_token.trim();
@@ -1504,17 +1630,21 @@ pub fn exchange_authorization_code(app: &AppHandle, code: &str) -> Result<(), St
             "code": code,
         }))
         .send()
-        .map_err(|e| format!("[TOKEN_EXCHANGE_NETWORK_ERROR] AniList token exchange failed: {e}"))?;
+        .map_err(|e| {
+            format!("[TOKEN_EXCHANGE_NETWORK_ERROR] AniList token exchange failed: {e}")
+        })?;
 
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().unwrap_or_else(|_| "<unavailable>".into());
-        return Err(format!("[TOKEN_EXCHANGE_HTTP_ERROR] AniList token endpoint returned HTTP {status}: {body}"));
+        return Err(format!(
+            "[TOKEN_EXCHANGE_HTTP_ERROR] AniList token endpoint returned HTTP {status}: {body}"
+        ));
     }
 
-    let payload: TokenExchangeResponse = response
-        .json()
-        .map_err(|e| format!("[TOKEN_EXCHANGE_PARSE_ERROR] Failed to parse AniList token response: {e}"))?;
+    let payload: TokenExchangeResponse = response.json().map_err(|e| {
+        format!("[TOKEN_EXCHANGE_PARSE_ERROR] Failed to parse AniList token response: {e}")
+    })?;
 
     persist_oauth_session(app, &payload.access_token, payload.expires_in)
         .map_err(|e| format!("[STORAGE_FAILED] {e}"))?;
@@ -1537,7 +1667,9 @@ fn read_access_token(app: &AppHandle) -> Result<String, String> {
         });
 
     if expiry_check == Some(1) {
-        return Err("[AUTH_EXPIRED] Your AniList session has expired. Please sign in again.".into());
+        return Err(
+            "[AUTH_EXPIRED] Your AniList session has expired. Please sign in again.".into(),
+        );
     }
 
     // Prefer OS keyring (no plaintext SQLite token).
@@ -1550,9 +1682,11 @@ fn read_access_token(app: &AppHandle) -> Result<String, String> {
     let connection = crate::db::open_connection(&database_path)?;
 
     connection
-        .query_row("SELECT access_token FROM auth_session WHERE id = 1", [], |row| {
-            row.get::<_, Option<String>>(0)
-        })
+        .query_row(
+            "SELECT access_token FROM auth_session WHERE id = 1",
+            [],
+            |row| row.get::<_, Option<String>>(0),
+        )
         .map_err(|e| e.to_string())?
         .filter(|t| !t.is_empty())
         .ok_or_else(|| "[NO_TOKEN] No AniList access token stored. Please sign in.".into())
@@ -1568,21 +1702,21 @@ fn missing_var(name: &str) -> String {
 }
 
 fn persist_oauth_session(
-        app: &AppHandle,
-        access_token: &str,
-        expires_in: Option<i64>,
+    app: &AppHandle,
+    access_token: &str,
+    expires_in: Option<i64>,
 ) -> Result<(), String> {
-        // Store in OS keyring; fall back to DB if unavailable.
-        let keyring_ok = keyring_store(access_token).is_ok();
-        let db_token: Option<&str> = if keyring_ok { None } else { Some(access_token) };
+    // Store in OS keyring; fall back to DB if unavailable.
+    let keyring_ok = keyring_store(access_token).is_ok();
+    let db_token: Option<&str> = if keyring_ok { None } else { Some(access_token) };
 
-        let database_path = crate::db::database_path(app)?;
-        let connection = crate::db::open_connection(&database_path)?;
+    let database_path = crate::db::database_path(app)?;
+    let connection = crate::db::open_connection(&database_path)?;
 
-        match expires_in {
-                Some(expires_in_seconds) => {
-                        let expires_modifier = format!("+{expires_in_seconds} seconds");
-                        connection
+    match expires_in {
+        Some(expires_in_seconds) => {
+            let expires_modifier = format!("+{expires_in_seconds} seconds");
+            connection
                                 .execute(
                                         "
                                         INSERT INTO auth_session (
@@ -1605,9 +1739,9 @@ fn persist_oauth_session(
                                         (db_token, expires_modifier.as_str()),
                                 )
                                 .map_err(|error| error.to_string())?;
-                }
-                None => {
-                        connection
+        }
+        None => {
+            connection
                                 .execute(
                                         "
                                         INSERT INTO auth_session (
@@ -1630,10 +1764,10 @@ fn persist_oauth_session(
                                         [db_token],
                                 )
                                 .map_err(|error| error.to_string())?;
-                }
         }
+    }
 
-        Ok(())
+    Ok(())
 }
 
 // ─── User list sync ───────────────────────────────────────────────────────────
@@ -1705,29 +1839,52 @@ pub fn fetch_user_lists(app: &AppHandle, media_type: &str) -> Result<(i64, i64, 
             let media = &entry.media;
 
             // Track high-water mark.
-            if entry.updated_at > max_hwm { max_hwm = entry.updated_at; }
+            if entry.updated_at > max_hwm {
+                max_hwm = entry.updated_at;
+            }
 
             // Conflict detection: if the local entry is dirty AND AniList has
             // a newer updatedAt than what we last pulled, both sides changed.
-            let existing: Option<(i64, Option<i64>, Option<String>, Option<f64>, i64, Option<String>)> = connection
+            #[allow(clippy::type_complexity)]
+            let existing: Option<(
+                i64,
+                Option<i64>,
+                Option<String>,
+                Option<f64>,
+                i64,
+                Option<String>,
+            )> = connection
                 .query_row(
                     "SELECT is_dirty, CAST(ani_list_updated_at AS INTEGER),
                             status, score, progress, notes
                      FROM media_list_entries
                      WHERE media_id = ?1 AND UPPER(media_type) = ?2 AND UPPER(list_kind) = ?2",
                     rusqlite::params![media.id, &local_type],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+                    |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    },
                 )
                 .optional()
                 .map_err(|e| e.to_string())?;
 
-            if let Some((is_dirty, prev_ani_ts, loc_status, loc_score, loc_progress, loc_notes)) = existing {
+            if let Some((is_dirty, prev_ani_ts, loc_status, loc_score, loc_progress, loc_notes)) =
+                existing
+            {
                 if is_dirty == 1 {
                     let prev = prev_ani_ts.unwrap_or(0);
                     if entry.updated_at > prev {
                         conflicts += 1;
                         let _ = crate::db::log_sync_event(
-                            &connection, media.id, "conflict",
+                            &connection,
+                            media.id,
+                            "conflict",
                             Some("Remote changed while local edit pending"),
                         );
                         let _ = crate::db::store_pending_conflict(
@@ -1746,7 +1903,9 @@ pub fn fetch_user_lists(app: &AppHandle, media_type: &str) -> Result<(i64, i64, 
                     } else {
                         // Remote unchanged — skip overwrite, log skipped.
                         let _ = crate::db::log_sync_event(
-                            &connection, media.id, "skipped",
+                            &connection,
+                            media.id,
+                            "skipped",
                             Some("Local dirty, remote unchanged"),
                         );
                     }
@@ -1755,7 +1914,7 @@ pub fn fetch_user_lists(app: &AppHandle, media_type: &str) -> Result<(i64, i64, 
 
             let cover = media.cover_image.as_ref().and_then(|c| c.large.as_deref());
             let is_adult = media.is_adult.unwrap_or(false) as i64;
-            let started_iso  = entry.started_at.as_ref().and_then(|d| d.to_iso_date());
+            let started_iso = entry.started_at.as_ref().and_then(|d| d.to_iso_date());
             let completed_iso = entry.completed_at.as_ref().and_then(|d| d.to_iso_date());
             let cache_payload = json!({
                 "id": media.id,
@@ -1787,8 +1946,9 @@ pub fn fetch_user_lists(app: &AppHandle, media_type: &str) -> Result<(i64, i64, 
             let status = entry.status.to_lowercase();
             let score = entry.score.filter(|&s| s > 0.0);
             let progress_vols = entry.progress_volumes.unwrap_or(0);
-                        let custom_lists_json = serde_json::to_string(&entry.custom_lists.clone().unwrap_or_default())
-                                .unwrap_or_else(|_| "[]".to_string());
+            let custom_lists_json =
+                serde_json::to_string(&entry.custom_lists.clone().unwrap_or_default())
+                    .unwrap_or_else(|_| "[]".to_string());
 
             connection.execute(
                 "INSERT INTO media_list_entries (
@@ -1825,7 +1985,9 @@ pub fn fetch_user_lists(app: &AppHandle, media_type: &str) -> Result<(i64, i64, 
         }
     }
 
-    connection.execute("COMMIT", []).map_err(|e| e.to_string())?;
+    connection
+        .execute("COMMIT", [])
+        .map_err(|e| e.to_string())?;
     Ok((synced, conflicts, max_hwm))
 }
 
@@ -1904,35 +2066,60 @@ pub fn fetch_user_lists_delta(
         let has_next = payload.page.page_info.has_next_page;
         let entries = payload.page.media_list;
 
-        if entries.is_empty() && !has_next { break; }
+        if entries.is_empty() && !has_next {
+            break;
+        }
 
         connection.execute("BEGIN", []).map_err(|e| e.to_string())?;
 
         for entry in &entries {
             let media = &entry.media;
 
-            if entry.updated_at > max_hwm { max_hwm = entry.updated_at; }
+            if entry.updated_at > max_hwm {
+                max_hwm = entry.updated_at;
+            }
 
             // Conflict detection (same as full sync).
-            let existing: Option<(i64, Option<i64>, Option<String>, Option<f64>, i64, Option<String>)> = connection
+            #[allow(clippy::type_complexity)]
+            let existing: Option<(
+                i64,
+                Option<i64>,
+                Option<String>,
+                Option<f64>,
+                i64,
+                Option<String>,
+            )> = connection
                 .query_row(
                     "SELECT is_dirty, CAST(ani_list_updated_at AS INTEGER),
                             status, score, progress, notes
                      FROM media_list_entries
                      WHERE media_id = ?1 AND UPPER(media_type) = ?2 AND UPPER(list_kind) = ?2",
                     rusqlite::params![media.id, &local_type],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+                    |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    },
                 )
                 .optional()
                 .map_err(|e| e.to_string())?;
 
-            if let Some((is_dirty, prev_ani_ts, loc_status, loc_score, loc_progress, loc_notes)) = existing {
+            if let Some((is_dirty, prev_ani_ts, loc_status, loc_score, loc_progress, loc_notes)) =
+                existing
+            {
                 if is_dirty == 1 {
                     let prev = prev_ani_ts.unwrap_or(0);
                     if entry.updated_at > prev {
                         conflicts += 1;
                         let _ = crate::db::log_sync_event(
-                            &connection, media.id, "conflict",
+                            &connection,
+                            media.id,
+                            "conflict",
                             Some("Remote changed while local edit pending"),
                         );
                         let _ = crate::db::store_pending_conflict(
@@ -1954,7 +2141,7 @@ pub fn fetch_user_lists_delta(
 
             let cover = media.cover_image.as_ref().and_then(|c| c.large.as_deref());
             let is_adult = media.is_adult.unwrap_or(false) as i64;
-            let started_iso  = entry.started_at.as_ref().and_then(|d| d.to_iso_date());
+            let started_iso = entry.started_at.as_ref().and_then(|d| d.to_iso_date());
             let completed_iso = entry.completed_at.as_ref().and_then(|d| d.to_iso_date());
             let cache_payload = json!({
                 "id": media.id,
@@ -1986,8 +2173,9 @@ pub fn fetch_user_lists_delta(
             let status = entry.status.to_lowercase();
             let score = entry.score.filter(|&s| s > 0.0);
             let progress_vols = entry.progress_volumes.unwrap_or(0);
-                        let custom_lists_json = serde_json::to_string(&entry.custom_lists.clone().unwrap_or_default())
-                                .unwrap_or_else(|_| "[]".to_string());
+            let custom_lists_json =
+                serde_json::to_string(&entry.custom_lists.clone().unwrap_or_default())
+                    .unwrap_or_else(|_| "[]".to_string());
 
             connection.execute(
                 "INSERT INTO media_list_entries (
@@ -2023,9 +2211,13 @@ pub fn fetch_user_lists_delta(
             synced += 1;
         }
 
-        connection.execute("COMMIT", []).map_err(|e| e.to_string())?;
+        connection
+            .execute("COMMIT", [])
+            .map_err(|e| e.to_string())?;
 
-        if !has_next { break; }
+        if !has_next {
+            break;
+        }
     }
 
     Ok((synced, conflicts, max_hwm))
@@ -2038,7 +2230,11 @@ pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
     // 1. Push all locally-dirty entries before pulling so the pull does not
     //    overwrite edits we have not uploaded yet.
     let push = push_dirty_entries(app).unwrap_or(SyncSummary {
-        synced: 0, pushed: 0, failed: 0, conflicts: 0, is_delta: false,
+        synced: 0,
+        pushed: 0,
+        failed: 0,
+        conflicts: 0,
+        is_delta: false,
         last_synced_at: String::new(),
     });
 
@@ -2074,6 +2270,7 @@ pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
 
 // ─── Media search ─────────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub fn search_media(
     app: &AppHandle,
     query: &str,
@@ -2148,17 +2345,52 @@ pub fn search_media(
     if !media_type.is_empty() {
         vars.insert("type".to_string(), json!(media_type));
     }
-    if let Some(v) = genres_in      { if !v.is_empty() { vars.insert("genre_in".to_string(),        json!(v)); } }
-    if let Some(v) = genres_not_in  { if !v.is_empty() { vars.insert("genre_not_in".to_string(),    json!(v)); } }
-    if let Some(v) = tags_in        { if !v.is_empty() { vars.insert("tag_in".to_string(),           json!(v)); } }
-    if let Some(v) = tags_not_in    { if !v.is_empty() { vars.insert("tag_not_in".to_string(),       json!(v)); } }
-    if let Some(v) = format_in      { if !v.is_empty() { vars.insert("format_in".to_string(),        json!(v)); } }
-    if let Some(s) = status_filter  { vars.insert("status".to_string(),                              json!(s)); }
-    vars.insert("sort".to_string(), json!([sort.unwrap_or_else(|| "SEARCH_MATCH".to_string())]));
-    if let Some(y) = year_greater   { vars.insert("startDate_greater".to_string(), json!(y * 10000)); }
-    if let Some(y) = year_lesser    { vars.insert("startDate_lesser".to_string(),  json!(y * 10000 + 9999)); }
-    if let Some(r) = minimum_tag_rank { if r > 0 { vars.insert("minimumTagRank".to_string(), json!(r)); } }
-    if let Some(a) = is_adult       { vars.insert("isAdult".to_string(),                             json!(a)); }
+    if let Some(v) = genres_in {
+        if !v.is_empty() {
+            vars.insert("genre_in".to_string(), json!(v));
+        }
+    }
+    if let Some(v) = genres_not_in {
+        if !v.is_empty() {
+            vars.insert("genre_not_in".to_string(), json!(v));
+        }
+    }
+    if let Some(v) = tags_in {
+        if !v.is_empty() {
+            vars.insert("tag_in".to_string(), json!(v));
+        }
+    }
+    if let Some(v) = tags_not_in {
+        if !v.is_empty() {
+            vars.insert("tag_not_in".to_string(), json!(v));
+        }
+    }
+    if let Some(v) = format_in {
+        if !v.is_empty() {
+            vars.insert("format_in".to_string(), json!(v));
+        }
+    }
+    if let Some(s) = status_filter {
+        vars.insert("status".to_string(), json!(s));
+    }
+    vars.insert(
+        "sort".to_string(),
+        json!([sort.unwrap_or_else(|| "SEARCH_MATCH".to_string())]),
+    );
+    if let Some(y) = year_greater {
+        vars.insert("startDate_greater".to_string(), json!(y * 10000));
+    }
+    if let Some(y) = year_lesser {
+        vars.insert("startDate_lesser".to_string(), json!(y * 10000 + 9999));
+    }
+    if let Some(r) = minimum_tag_rank {
+        if r > 0 {
+            vars.insert("minimumTagRank".to_string(), json!(r));
+        }
+    }
+    if let Some(a) = is_adult {
+        vars.insert("isAdult".to_string(), json!(a));
+    }
 
     let payload: SearchPayload = graphql_post(
         &config.graphql_url,
@@ -2174,12 +2406,19 @@ pub fn search_media(
         .into_iter()
         .map(|m| {
             let local_type = m.media_type.to_lowercase();
-            let title = m.title.english.filter(|s| !s.is_empty())
+            let title = m
+                .title
+                .english
+                .filter(|s| !s.is_empty())
                 .or(m.title.romaji)
                 .unwrap_or_else(|| format!("Media {}", m.id));
             let cover = m.cover_image.and_then(|c| c.large);
             let in_library = conn
-                .query_row("SELECT 1 FROM media_list_entries WHERE media_id = ?1 LIMIT 1", [m.id], |_| Ok(true))
+                .query_row(
+                    "SELECT 1 FROM media_list_entries WHERE media_id = ?1 LIMIT 1",
+                    [m.id],
+                    |_| Ok(true),
+                )
                 .optional()
                 .unwrap_or(None)
                 .unwrap_or(false);
@@ -2470,7 +2709,8 @@ pub fn fetch_notifications(
         }
 
         let created_at = i64_at(&node, &["createdAt"]).unwrap_or_default();
-        let context = str_at(&node, &["context"]).or_else(|| str_at(&node, &["contexts"]))
+        let context = str_at(&node, &["context"])
+            .or_else(|| str_at(&node, &["contexts"]))
             .unwrap_or_else(|| "New notification".to_string());
 
         let media_id = i64_at(&node, &["media", "id"]).or_else(|| i64_at(&node, &["mediaId"]));
@@ -2517,7 +2757,10 @@ pub fn fetch_notifications(
                     format!("{t} — Airing update")
                 }
             }
-            "FOLLOWING" => format!("{} followed you", user_name.clone().unwrap_or_else(|| "Someone".to_string())),
+            "FOLLOWING" => format!(
+                "{} followed you",
+                user_name.clone().unwrap_or_else(|| "Someone".to_string())
+            ),
             "MEDIA_DATA_CHANGE" | "MEDIA_MERGE" | "MEDIA_DELETION" | "RELATED_MEDIA_ADDITION" => {
                 media_title
                     .or(deleted_title)
@@ -2557,7 +2800,7 @@ pub fn fetch_notifications(
         });
     }
 
-    items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    items.sort_by_key(|b| std::cmp::Reverse(b.created_at));
     if items.len() > request_per_page as usize {
         items.truncate(request_per_page as usize);
     }
@@ -2575,8 +2818,33 @@ pub fn push_dirty_entries(app: &AppHandle) -> Result<crate::models::SyncSummary,
     let dirty = crate::db::get_dirty_entries(app)?;
     let mut pushed = 0i64;
     let mut failed = 0i64;
-    for (local_id, media_id, status, score, progress, progress_volumes, repeat_count, started_at, completed_at, notes, custom_lists) in dirty {
-        match save_media_list_entry(app, media_id, &status, score, progress, progress_volumes, repeat_count, started_at, completed_at, notes, Some(custom_lists)) {
+    for (
+        local_id,
+        media_id,
+        status,
+        score,
+        progress,
+        progress_volumes,
+        repeat_count,
+        started_at,
+        completed_at,
+        notes,
+        custom_lists,
+    ) in dirty
+    {
+        match save_media_list_entry(
+            app,
+            media_id,
+            &status,
+            score,
+            progress,
+            progress_volumes,
+            repeat_count,
+            started_at,
+            completed_at,
+            notes,
+            Some(custom_lists),
+        ) {
             Ok(()) => {
                 let _ = crate::db::clear_entry_dirty(app, local_id);
                 pushed += 1;
@@ -2664,7 +2932,11 @@ pub fn fetch_airing_schedule(app: &AppHandle) -> Result<i64, String> {
 
     conn.execute("BEGIN", []).map_err(|e| e.to_string())?;
     for s in &schedules {
-        let cover = s.media.cover_image.as_ref().and_then(|c| c.large.as_deref());
+        let cover = s
+            .media
+            .cover_image
+            .as_ref()
+            .and_then(|c| c.large.as_deref());
         let payload_json = json!({
             "title": { "romaji": s.media.title.romaji, "english": s.media.title.english },
             "coverImage": { "large": cover },
@@ -2778,7 +3050,13 @@ pub fn get_global_airing_schedule(
             });
         }
 
-        if !data.page.page_info.as_ref().map(|p| p.has_next_page).unwrap_or(false) {
+        if !data
+            .page
+            .page_info
+            .as_ref()
+            .map(|p| p.has_next_page)
+            .unwrap_or(false)
+        {
             break;
         }
     }
@@ -2786,6 +3064,7 @@ pub fn get_global_airing_schedule(
     Ok(result)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn save_media_list_entry(
     app: &AppHandle,
     media_id: i64,
@@ -2803,11 +3082,11 @@ pub fn save_media_list_entry(
     let access_token = read_access_token(app)?;
 
     let ani_status = match status {
-        "current"   => "CURRENT",
-        "planning"  => "PLANNING",
+        "current" => "CURRENT",
+        "planning" => "PLANNING",
         "completed" => "COMPLETED",
-        "dropped"   => "DROPPED",
-        "paused"    => "PAUSED",
+        "dropped" => "DROPPED",
+        "paused" => "PAUSED",
         "repeating" => "REPEATING",
         other => return Err(format!("Unknown list status: {other}")),
     };
@@ -2868,15 +3147,13 @@ pub fn save_media_list_entry(
         "UPDATE media_list_entries SET anilist_entry_id = ?1
          WHERE media_id = ?2 AND anilist_entry_id IS NULL",
         (anilist_id, media_id),
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(())
 }
 
-pub fn delete_media_list_entry(
-    app: &AppHandle,
-    anilist_entry_id: i64,
-) -> Result<(), String> {
+pub fn delete_media_list_entry(app: &AppHandle, anilist_entry_id: i64) -> Result<(), String> {
     let config = load_config()?;
     let access_token = read_access_token(app)?;
 
@@ -2904,7 +3181,11 @@ fn read_viewer_id(app: &AppHandle) -> Result<i64, String> {
     let database_path = crate::db::database_path(app)?;
     let connection = crate::db::open_connection(&database_path)?;
     connection
-        .query_row("SELECT viewer_id FROM auth_session WHERE id = 1", [], |row| row.get::<_, Option<i64>>(0))
+        .query_row(
+            "SELECT viewer_id FROM auth_session WHERE id = 1",
+            [],
+            |row| row.get::<_, Option<i64>>(0),
+        )
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "[NO_VIEWER_ID] No viewer ID stored. Please sign in first.".to_string())
 }
@@ -2924,18 +3205,28 @@ pub fn fetch_media_details(
         let mut model = serde_json::from_str::<crate::models::MediaDetails>(payload).ok()?;
         model.cached_at = fetched_at.to_string();
         model.in_library = connection
-            .query_row("SELECT 1 FROM media_list_entries WHERE media_id = ?1 LIMIT 1", [media_id], |_| Ok(true))
-            .optional().ok().flatten().unwrap_or(false);
+            .query_row(
+                "SELECT 1 FROM media_list_entries WHERE media_id = ?1 LIMIT 1",
+                [media_id],
+                |_| Ok(true),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .unwrap_or(false);
         Some(model)
     };
 
     // Check for a recent cache entry that is parseable as the app model.
-    let cached: Option<(String, String)> = connection.query_row(
-        "SELECT payload_json, fetched_at FROM media_cache
+    let cached: Option<(String, String)> = connection
+        .query_row(
+            "SELECT payload_json, fetched_at FROM media_cache
          WHERE media_id = ?1 AND datetime(fetched_at, '+1 hour') > CURRENT_TIMESTAMP",
-        [media_id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    ).optional().map_err(|e| e.to_string())?;
+            [media_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
 
     if let Some((ps, fa)) = cached {
         // Older entries (minimal sync payloads without genres/tags, or legacy
@@ -2947,11 +3238,14 @@ pub fn fetch_media_details(
     }
 
     // Keep stale cache around as an offline fallback if live fetch fails.
-    let stale_cached: Option<(String, String)> = connection.query_row(
-        "SELECT payload_json, fetched_at FROM media_cache WHERE media_id = ?1",
-        [media_id],
-        |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-    ).optional().map_err(|e| e.to_string())?;
+    let stale_cached: Option<(String, String)> = connection
+        .query_row(
+            "SELECT payload_json, fetched_at FROM media_cache WHERE media_id = ?1",
+            [media_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
 
     // Cache miss, stale, or unparseable → fetch fresh from AniList.
     match fetch_and_cache_media_details(app, media_id, &connection) {
@@ -3041,7 +3335,8 @@ fn fetch_and_cache_media_details(
         &config.graphql_url,
         &access_token,
         &json!({ "query": gql, "variables": { "id": media_id } }),
-    ).map(|p: MediaDetailsPayload| p.media)
+    )
+    .map(|p: MediaDetailsPayload| p.media)
     .map_err(|e| format!("[MEDIA_DETAILS_FETCH_FAILED] {e}"))?;
 
     // Convert to the app model immediately.  Storing the model JSON (rather
@@ -3070,15 +3365,23 @@ fn fetch_and_cache_media_details(
         (media_id, model.media_type.as_str(), model.title_romaji.as_deref(), model.title_english.as_deref(), model.title_native.as_deref(), model.cover_image.as_deref(), is_adult, &payload_str),
     ).map_err(|e| e.to_string())?;
 
-    let fetched_at = connection.query_row(
-        "SELECT fetched_at FROM media_cache WHERE media_id = ?1",
-        [media_id],
-        |row| row.get::<_, String>(0),
-    ).unwrap_or_else(|_| String::new());
+    let fetched_at = connection
+        .query_row(
+            "SELECT fetched_at FROM media_cache WHERE media_id = ?1",
+            [media_id],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap_or_else(|_| String::new());
 
     let in_library: bool = connection
-        .query_row("SELECT 1 FROM media_list_entries WHERE media_id = ?1 LIMIT 1", [media_id], |_| Ok(true))
-        .optional().map_err(|e| e.to_string())?.unwrap_or(false);
+        .query_row(
+            "SELECT 1 FROM media_list_entries WHERE media_id = ?1 LIMIT 1",
+            [media_id],
+            |_| Ok(true),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .unwrap_or(false);
 
     let mut result = model;
     result.cached_at = fetched_at;
@@ -3091,7 +3394,9 @@ fn media_details_node_to_model(
     cached_at: String,
     in_library: bool,
 ) -> crate::models::MediaDetails {
-    let cover = node.cover_image.as_ref()
+    let cover = node
+        .cover_image
+        .as_ref()
         .and_then(|c| c.extra_large.clone().or_else(|| c.large.clone()));
     crate::models::MediaDetails {
         media_id: node.id,
@@ -3112,21 +3417,33 @@ fn media_details_node_to_model(
         season_year: node.season_year,
         source: node.source,
         genres: node.genres,
-        tags: node.tags.into_iter().map(|t| crate::models::MediaTag {
-            name: t.name,
-            category: t.category,
-            rank: t.rank,
-            is_spoiler: t.is_spoiler.unwrap_or(false),
-        }).collect(),
+        tags: node
+            .tags
+            .into_iter()
+            .map(|t| crate::models::MediaTag {
+                name: t.name,
+                category: t.category,
+                rank: t.rank,
+                is_spoiler: t.is_spoiler.unwrap_or(false),
+            })
+            .collect(),
         average_score: node.average_score,
         popularity: node.popularity,
         favourites: node.favourites,
         is_adult: node.is_adult.unwrap_or(false),
-        studios: node.studios.map(|s| s.nodes.into_iter().map(|n| crate::models::MediaStudio {
-            id: n.id,
-            name: n.name,
-            is_animation_studio: n.is_animation_studio,
-        }).collect()).unwrap_or_default(),
+        studios: node
+            .studios
+            .map(|s| {
+                s.nodes
+                    .into_iter()
+                    .map(|n| crate::models::MediaStudio {
+                        id: n.id,
+                        name: n.name,
+                        is_animation_studio: n.is_animation_studio,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         next_airing_episode: node.next_airing_episode.map(|a| crate::models::AiringInfo {
             episode: a.episode,
             airing_at: a.airing_at,
@@ -3135,76 +3452,118 @@ fn media_details_node_to_model(
         end_date: node.end_date.and_then(|d| d.to_iso_date()),
         cached_at,
         in_library,
-        relations: node.relations.map(|r| {
-            r.edges.into_iter()
-                .filter_map(|e| {
-                    let rt = e.relation_type?;
-                    // Only expose relation types relevant to media browsing.
-                    match rt.as_str() {
-                        "PREQUEL" | "SEQUEL" | "ALTERNATIVE" | "SPIN_OFF" |
-                        "ADAPTATION" | "SIDE_STORY" | "SUMMARY" | "COMPILATION" | "PARENT" => {},
-                        _ => return None,
-                    }
-                    Some(crate::models::MediaRelation {
-                        media_id: e.node.id,
-                        media_type: e.node.media_type,
-                        format: e.node.format,
-                        title: e.node.title.english
-                            .or(e.node.title.romaji)
+        relations: node
+            .relations
+            .map(|r| {
+                r.edges
+                    .into_iter()
+                    .filter_map(|e| {
+                        let rt = e.relation_type?;
+                        // Only expose relation types relevant to media browsing.
+                        match rt.as_str() {
+                            "PREQUEL" | "SEQUEL" | "ALTERNATIVE" | "SPIN_OFF" | "ADAPTATION"
+                            | "SIDE_STORY" | "SUMMARY" | "COMPILATION" | "PARENT" => {}
+                            _ => return None,
+                        }
+                        Some(crate::models::MediaRelation {
+                            media_id: e.node.id,
+                            media_type: e.node.media_type,
+                            format: e.node.format,
+                            title: e
+                                .node
+                                .title
+                                .english
+                                .or(e.node.title.romaji)
+                                .unwrap_or_else(|| e.node.id.to_string()),
+                            cover_image: e.node.cover_image.and_then(|c| c.large),
+                            status: e.node.status,
+                            relation_type: rt,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        characters: node
+            .characters
+            .map(|c| {
+                c.edges
+                    .into_iter()
+                    .map(|e| crate::models::MediaCharacterEdge {
+                        character_id: e.node.id,
+                        name: e
+                            .node
+                            .name
+                            .and_then(|n| n.full)
                             .unwrap_or_else(|| e.node.id.to_string()),
-                        cover_image: e.node.cover_image.and_then(|c| c.large),
-                        status: e.node.status,
-                        relation_type: rt,
+                        image: e.node.image.and_then(|i| i.large),
+                        role: e.role.unwrap_or_else(|| "SUPPORTING".to_string()),
                     })
-                })
-                .collect()
-        }).unwrap_or_default(),
-        characters: node.characters.map(|c| {
-            c.edges.into_iter().map(|e| crate::models::MediaCharacterEdge {
-                character_id: e.node.id,
-                name: e.node.name.and_then(|n| n.full).unwrap_or_else(|| e.node.id.to_string()),
-                image: e.node.image.and_then(|i| i.large),
-                role: e.role.unwrap_or_else(|| "SUPPORTING".to_string()),
-            }).collect()
-        }).unwrap_or_default(),
-        staff: node.staff.map(|s| {
-            s.edges.into_iter().map(|e| crate::models::MediaStaffEdge {
-                staff_id: e.node.id,
-                name: e.node.name.and_then(|n| n.full).unwrap_or_else(|| e.node.id.to_string()),
-                image: e.node.image.and_then(|i| i.large),
-                role: e.role.unwrap_or_default(),
-            }).collect()
-        }).unwrap_or_default(),
-        recommendations: node.recommendations.map(|r| {
-            r.nodes.into_iter()
-                .filter_map(|n| {
-                    let m = n.media_recommendation?;
-                    Some(crate::models::MediaRecommendation {
-                        media_id: m.id,
-                        format: m.format,
-                        title: m.title.english
-                            .or(m.title.romaji)
-                            .unwrap_or_else(|| m.id.to_string()),
-                        cover_image: m.cover_image.and_then(|c| c.large),
-                        mean_score: m.mean_score,
-                        rating: n.rating.unwrap_or(0),
+                    .collect()
+            })
+            .unwrap_or_default(),
+        staff: node
+            .staff
+            .map(|s| {
+                s.edges
+                    .into_iter()
+                    .map(|e| crate::models::MediaStaffEdge {
+                        staff_id: e.node.id,
+                        name: e
+                            .node
+                            .name
+                            .and_then(|n| n.full)
+                            .unwrap_or_else(|| e.node.id.to_string()),
+                        image: e.node.image.and_then(|i| i.large),
+                        role: e.role.unwrap_or_default(),
                     })
-                })
-                .collect()
-        }).unwrap_or_default(),
-        external_links: node.external_links.map(|links| {
-            links.into_iter().map(|l| crate::models::ExternalLink {
-                url: l.url,
-                site: l.site,
-                link_type: l.link_type.unwrap_or_else(|| "INFO".to_string()),
-            }).collect()
-        }).unwrap_or_default(),
+                    .collect()
+            })
+            .unwrap_or_default(),
+        recommendations: node
+            .recommendations
+            .map(|r| {
+                r.nodes
+                    .into_iter()
+                    .filter_map(|n| {
+                        let m = n.media_recommendation?;
+                        Some(crate::models::MediaRecommendation {
+                            media_id: m.id,
+                            format: m.format,
+                            title: m
+                                .title
+                                .english
+                                .or(m.title.romaji)
+                                .unwrap_or_else(|| m.id.to_string()),
+                            cover_image: m.cover_image.and_then(|c| c.large),
+                            mean_score: m.mean_score,
+                            rating: n.rating.unwrap_or(0),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        external_links: node
+            .external_links
+            .map(|links| {
+                links
+                    .into_iter()
+                    .map(|l| crate::models::ExternalLink {
+                        url: l.url,
+                        site: l.site,
+                        link_type: l.link_type.unwrap_or_else(|| "INFO".to_string()),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
     }
 }
 
 // ─── Persist viewer profile ───────────────────────────────────────────────────
 
-fn persist_viewer_profile(app: &AppHandle, viewer: &crate::models::AniListViewer) -> Result<(), String> {
+fn persist_viewer_profile(
+    app: &AppHandle,
+    viewer: &crate::models::AniListViewer,
+) -> Result<(), String> {
     let database_path = crate::db::database_path(app)?;
     let connection = crate::db::open_connection(&database_path)?;
     let payload = serde_json::json!({

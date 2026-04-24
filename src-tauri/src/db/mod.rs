@@ -6,8 +6,8 @@ use tauri::{AppHandle, Manager};
 use crate::models::{
     ActivityEntry, AppSettings, BreakdownItem, CacheStats, DatabaseInitResult, DatabaseOverview,
     DatabaseTableInfo, ExportResult, FoundationModule, HeatmapDay, ImportResult, LibrarySnapshot,
-    LibraryStats, MonthlyActivityCount, NotificationOverride, NotificationSettings, PendingConflict,
-    ScoreBucket, SyncLogEntry,
+    LibraryStats, MonthlyActivityCount, NotificationOverride, NotificationSettings,
+    PendingConflict, ScoreBucket, SyncLogEntry,
 };
 
 const DATABASE_FILE_NAME: &str = "miyolist.sqlite3";
@@ -78,7 +78,10 @@ pub fn get_database_overview(app: &AppHandle) -> Result<DatabaseOverview, String
 }
 
 pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let app_data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?;
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
 }
 
@@ -324,11 +327,31 @@ fn apply_v2(connection: &Connection) -> Result<(), String> {
     // partial run (app killed mid-migration) leaves whatever columns were
     // already added in place rather than rolling them back.  Each helper is a
     // no-op when the column already exists.
-    add_column_if_missing(connection, "media_list_entries", "anilist_entry_id",   "INTEGER")?;
-    add_column_if_missing(connection, "media_list_entries", "progress_volumes",   "INTEGER NOT NULL DEFAULT 0")?;
-    add_column_if_missing(connection, "media_list_entries", "custom_lists_json",  "TEXT")?;
-    add_column_if_missing(connection, "media_cache",        "is_adult",           "INTEGER NOT NULL DEFAULT 0")?;
-    add_column_if_missing(connection, "media_cache",        "title_native",       "TEXT")?;
+    add_column_if_missing(
+        connection,
+        "media_list_entries",
+        "anilist_entry_id",
+        "INTEGER",
+    )?;
+    add_column_if_missing(
+        connection,
+        "media_list_entries",
+        "progress_volumes",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(
+        connection,
+        "media_list_entries",
+        "custom_lists_json",
+        "TEXT",
+    )?;
+    add_column_if_missing(
+        connection,
+        "media_cache",
+        "is_adult",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column_if_missing(connection, "media_cache", "title_native", "TEXT")?;
 
     // Everything else (indexes, new tables) is safely idempotent via IF NOT
     // EXISTS.  Use INSERT OR IGNORE so re-running after a partial migration
@@ -417,7 +440,12 @@ fn apply_v3(connection: &Connection) -> Result<(), String> {
 /// Adds `notified` flag to `airing_cache` so the notification system can
 /// track which episodes have already generated a desktop alert.
 fn apply_v4(connection: &Connection) -> Result<(), String> {
-    add_column_if_missing(connection, "airing_cache", "notified", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column_if_missing(
+        connection,
+        "airing_cache",
+        "notified",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
 
     connection
         .execute_batch(
@@ -696,11 +724,16 @@ pub fn get_list_entries(
     match media_type.as_deref() {
         Some("NOVEL") => {
             where_parts.push("UPPER(e.media_type) = 'MANGA'".to_string());
-            where_parts.push("UPPER(COALESCE(json_extract(c.payload_json,'$.format'),'')) = 'NOVEL'".to_string());
+            where_parts.push(
+                "UPPER(COALESCE(json_extract(c.payload_json,'$.format'),'')) = 'NOVEL'".to_string(),
+            );
         }
         Some("MANGA") => {
             where_parts.push("UPPER(e.media_type) = 'MANGA'".to_string());
-            where_parts.push("UPPER(COALESCE(json_extract(c.payload_json,'$.format'),'')) != 'NOVEL'".to_string());
+            where_parts.push(
+                "UPPER(COALESCE(json_extract(c.payload_json,'$.format'),'')) != 'NOVEL'"
+                    .to_string(),
+            );
         }
         Some(mt) if !mt.is_empty() => {
             where_parts.push(format!("UPPER(e.media_type) = ?{}", param_values.len() + 1));
@@ -740,25 +773,25 @@ pub fn get_list_entries(
             let custom_lists: Vec<String> =
                 serde_json::from_str(&custom_lists_json).unwrap_or_default();
             Ok(crate::models::ListEntry {
-                local_id:             row.get(0)?,
-                anilist_entry_id:     row.get(1)?,
-                media_id:             row.get(2)?,
-                media_type:           row.get(3)?,
-                list_kind:            row.get(4)?,
-                title:                row.get(5)?,
-                cover_image:          row.get(6)?,
-                status:               row.get(7)?,
-                score:                row.get(8)?,
-                progress:             row.get(9)?,
-                progress_volumes:     row.get(10)?,
+                local_id: row.get(0)?,
+                anilist_entry_id: row.get(1)?,
+                media_id: row.get(2)?,
+                media_type: row.get(3)?,
+                list_kind: row.get(4)?,
+                title: row.get(5)?,
+                cover_image: row.get(6)?,
+                status: row.get(7)?,
+                score: row.get(8)?,
+                progress: row.get(9)?,
+                progress_volumes: row.get(10)?,
                 episodes_or_chapters: row.get(11)?,
-                repeat_count:         row.get(12)?,
-                notes:                row.get(13)?,
-                started_at:           row.get(14)?,
-                completed_at:         row.get(15)?,
+                repeat_count: row.get(12)?,
+                notes: row.get(13)?,
+                started_at: row.get(14)?,
+                completed_at: row.get(15)?,
                 custom_lists,
-                updated_at:           row.get(17)?,
-                is_dirty:             row.get::<_, i64>(18)? != 0,
+                updated_at: row.get(17)?,
+                is_dirty: row.get::<_, i64>(18)? != 0,
             })
         })
         .map_err(|e| e.to_string())?
@@ -798,25 +831,25 @@ pub fn get_list_entry_by_media_id(
             let custom_lists: Vec<String> =
                 serde_json::from_str(&custom_lists_json).unwrap_or_default();
             Ok(crate::models::ListEntry {
-                local_id:             row.get(0)?,
-                anilist_entry_id:     row.get(1)?,
-                media_id:             row.get(2)?,
-                media_type:           row.get(3)?,
-                list_kind:            row.get(4)?,
-                title:                row.get(5)?,
-                cover_image:          row.get(6)?,
-                status:               row.get(7)?,
-                score:                row.get(8)?,
-                progress:             row.get(9)?,
-                progress_volumes:     row.get(10)?,
+                local_id: row.get(0)?,
+                anilist_entry_id: row.get(1)?,
+                media_id: row.get(2)?,
+                media_type: row.get(3)?,
+                list_kind: row.get(4)?,
+                title: row.get(5)?,
+                cover_image: row.get(6)?,
+                status: row.get(7)?,
+                score: row.get(8)?,
+                progress: row.get(9)?,
+                progress_volumes: row.get(10)?,
                 episodes_or_chapters: row.get(11)?,
-                repeat_count:         row.get(12)?,
-                notes:                row.get(13)?,
-                started_at:           row.get(14)?,
-                completed_at:         row.get(15)?,
+                repeat_count: row.get(12)?,
+                notes: row.get(13)?,
+                started_at: row.get(14)?,
+                completed_at: row.get(15)?,
                 custom_lists,
-                updated_at:           row.get(17)?,
-                is_dirty:             row.get::<_, i64>(18)? != 0,
+                updated_at: row.get(17)?,
+                is_dirty: row.get::<_, i64>(18)? != 0,
             })
         })
         .optional()
@@ -827,6 +860,7 @@ pub fn get_list_entry_by_media_id(
 
 // ─── List entry writes ────────────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 pub fn update_list_entry_local(
     app: &AppHandle,
     local_id: i64,
@@ -870,8 +904,18 @@ pub fn update_list_entry_local(
                  repeat_count=?5, started_at=?6, completed_at=?7,
                  notes=?8, custom_lists_json=?9, is_dirty=1, updated_at=CURRENT_TIMESTAMP
              WHERE id=?10",
-            (status, score, progress, progress_volumes, repeat_count,
-             &start_date, &completed_date, &notes, &custom_lists_json, local_id),
+            (
+                status,
+                score,
+                progress,
+                progress_volumes,
+                repeat_count,
+                &start_date,
+                &completed_date,
+                &notes,
+                &custom_lists_json,
+                local_id,
+            ),
         )
         .map_err(|e| e.to_string())?;
 
@@ -880,22 +924,37 @@ pub fn update_list_entry_local(
         let mt = media_type.as_str();
         if old_status.to_uppercase() != status.to_uppercase() {
             let _ = log_activity_conn(
-                &connection, media_id, mt, "status_change",
-                Some(&old_status), Some(status), None,
+                &connection,
+                media_id,
+                mt,
+                "status_change",
+                Some(&old_status),
+                Some(status),
+                None,
             );
         }
         let new_score_key = score.map(|s| format!("{:.1}", s));
         let old_score_key = old_score.map(|s| format!("{:.1}", s));
         if old_score_key != new_score_key {
             let _ = log_activity_conn(
-                &connection, media_id, mt, "score_change",
-                old_score_key.as_deref(), new_score_key.as_deref(), None,
+                &connection,
+                media_id,
+                mt,
+                "score_change",
+                old_score_key.as_deref(),
+                new_score_key.as_deref(),
+                None,
             );
         }
         if old_progress != progress {
             let _ = log_activity_conn(
-                &connection, media_id, mt, "progress_update",
-                Some(&old_progress.to_string()), Some(&progress.to_string()), None,
+                &connection,
+                media_id,
+                mt,
+                "progress_update",
+                Some(&old_progress.to_string()),
+                Some(&progress.to_string()),
+                None,
             );
         }
     }
@@ -918,9 +977,25 @@ pub fn clear_entry_dirty(app: &AppHandle, local_id: i64) -> Result<(), String> {
 /// Returns all entries flagged as locally-modified (`is_dirty = 1`) with the
 /// fields required by the `SaveMediaListEntry` AniList mutation.
 /// Tuple: `(local_id, media_id, status, score, progress, progress_volumes, repeat_count, started_at, completed_at, notes, custom_lists)`
+#[allow(clippy::type_complexity)]
 pub fn get_dirty_entries(
     app: &AppHandle,
-) -> Result<Vec<(i64, i64, String, Option<f64>, i64, i64, i64, Option<String>, Option<String>, Option<String>, Vec<String>)>, String> {
+) -> Result<
+    Vec<(
+        i64,
+        i64,
+        String,
+        Option<f64>,
+        i64,
+        i64,
+        i64,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Vec<String>,
+    )>,
+    String,
+> {
     let database_path = database_path(app)?;
     let connection = open_connection(&database_path)?;
     let mut stmt = connection
@@ -1034,15 +1109,15 @@ pub fn get_airing_schedule(app: &AppHandle) -> Result<Vec<crate::models::AiringE
     let rows = stmt
         .query_map([], |row| {
             Ok(crate::models::AiringEntry {
-                media_id:       row.get(0)?,
-                title:          row.get(1)?,
-                cover_image:    row.get(2)?,
-                episode:        row.get(3)?,
-                airing_at:      row.get(4)?,
-                notified:       row.get::<_, i64>(5)? != 0,
-                user_progress:  row.get(6)?,
-                list_status:    row.get(7)?,
-                score:          row.get(8)?,
+                media_id: row.get(0)?,
+                title: row.get(1)?,
+                cover_image: row.get(2)?,
+                episode: row.get(3)?,
+                airing_at: row.get(4)?,
+                notified: row.get::<_, i64>(5)? != 0,
+                user_progress: row.get(6)?,
+                list_status: row.get(7)?,
+                score: row.get(8)?,
                 total_episodes: row.get(9)?,
             })
         })
@@ -1056,9 +1131,7 @@ pub fn get_airing_schedule(app: &AppHandle) -> Result<Vec<crate::models::AiringE
 /// Returns all airing entries that have aired (airing_at < now) and have not
 /// yet been notified.  Caller should send OS notifications and then call
 /// `mark_airing_notified` for each.
-pub fn get_unnotified_aired(
-    app: &AppHandle,
-) -> Result<Vec<crate::models::AiringEntry>, String> {
+pub fn get_unnotified_aired(app: &AppHandle) -> Result<Vec<crate::models::AiringEntry>, String> {
     initialize_database(app)?;
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
@@ -1090,15 +1163,15 @@ pub fn get_unnotified_aired(
     let rows = stmt
         .query_map([], |row| {
             Ok(crate::models::AiringEntry {
-                media_id:       row.get(0)?,
-                title:          row.get(1)?,
-                cover_image:    row.get(2)?,
-                episode:        row.get(3)?,
-                airing_at:      row.get(4)?,
-                notified:       false,
-                user_progress:  row.get(6)?,
-                list_status:    row.get(7)?,
-                score:          row.get(8)?,
+                media_id: row.get(0)?,
+                title: row.get(1)?,
+                cover_image: row.get(2)?,
+                episode: row.get(3)?,
+                airing_at: row.get(4)?,
+                notified: false,
+                user_progress: row.get(6)?,
+                list_status: row.get(7)?,
+                score: row.get(8)?,
                 total_episodes: row.get(9)?,
             })
         })
@@ -1177,9 +1250,7 @@ pub fn mark_airing_notified(app: &AppHandle, media_id: i64, episode: i64) -> Res
 
 // ─── Notification settings ────────────────────────────────────────────────────
 
-pub fn get_notification_settings(
-    app: &AppHandle,
-) -> Result<NotificationSettings, String> {
+pub fn get_notification_settings(app: &AppHandle) -> Result<NotificationSettings, String> {
     initialize_database(app)?;
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
@@ -1252,7 +1323,8 @@ pub fn get_notification_overrides(
 
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
-    let mut sql = String::from("SELECT media_id, enabled FROM notification_overrides WHERE media_id IN (");
+    let mut sql =
+        String::from("SELECT media_id, enabled FROM notification_overrides WHERE media_id IN (");
     for index in 0..media_ids.len() {
         if index > 0 {
             sql.push(',');
@@ -1264,12 +1336,15 @@ pub fn get_notification_overrides(
 
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(rusqlite::params_from_iter(media_ids.iter().copied()), |row| {
-            Ok(NotificationOverride {
-                media_id: row.get(0)?,
-                enabled: row.get::<_, i64>(1)? != 0,
-            })
-        })
+        .query_map(
+            rusqlite::params_from_iter(media_ids.iter().copied()),
+            |row| {
+                Ok(NotificationOverride {
+                    media_id: row.get(0)?,
+                    enabled: row.get::<_, i64>(1)? != 0,
+                })
+            },
+        )
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -1299,11 +1374,7 @@ pub fn set_notification_override(
 /// an anime entry identified by `media_id`.  Clamps to 0 and the known total
 /// episode count.  Sets `is_dirty = 1` so the change is picked up by the next
 /// sync / auto-sync cycle.  Returns the new progress value.
-pub fn increment_anime_progress(
-    app: &AppHandle,
-    media_id: i64,
-    delta: i64,
-) -> Result<i64, String> {
+pub fn increment_anime_progress(app: &AppHandle, media_id: i64, delta: i64) -> Result<i64, String> {
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
 
@@ -1373,7 +1444,14 @@ fn log_activity_conn(
     conn.execute(
         "INSERT INTO activity_log(media_id, media_type, activity_type, old_value, new_value, note)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        (media_id, media_type, activity_type, old_value, new_value, note),
+        (
+            media_id,
+            media_type,
+            activity_type,
+            old_value,
+            new_value,
+            note,
+        ),
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -1425,11 +1503,11 @@ pub fn get_library_stats(app: &AppHandle) -> Result<LibraryStats, String> {
         )
         .map_err(|e| e.to_string())
     };
-    let count_current   = status_count("CURRENT")?;
+    let count_current = status_count("CURRENT")?;
     let count_completed = status_count("COMPLETED")?;
-    let count_planning  = status_count("PLANNING")?;
-    let count_dropped   = status_count("DROPPED")?;
-    let count_paused    = status_count("PAUSED")?;
+    let count_planning = status_count("PLANNING")?;
+    let count_dropped = status_count("DROPPED")?;
+    let count_paused = status_count("PAUSED")?;
     let count_repeating = status_count("REPEATING")?;
 
     // ── progress totals ──────────────────────────────────────────────────────
@@ -1483,7 +1561,9 @@ pub fn get_library_stats(app: &AppHandle) -> Result<LibraryStats, String> {
         .map_err(|e| e.to_string())?;
 
     // ── score distribution (1-10) ────────────────────────────────────────────
-    let mut score_distribution: Vec<ScoreBucket> = (1i64..=10).map(|s| ScoreBucket { score: s, count: 0 }).collect();
+    let mut score_distribution: Vec<ScoreBucket> = (1i64..=10)
+        .map(|s| ScoreBucket { score: s, count: 0 })
+        .collect();
     {
         let mut stmt = conn
             .prepare(
@@ -1499,7 +1579,7 @@ pub fn get_library_stats(app: &AppHandle) -> Result<LibraryStats, String> {
             .map_err(|e| e.to_string())?;
         for row in rows.flatten() {
             let (s, c) = row;
-            if s >= 1 && s <= 10 {
+            if (1..=10).contains(&s) {
                 score_distribution[(s - 1) as usize].count = c;
             }
         }
@@ -1523,7 +1603,9 @@ pub fn get_library_stats(app: &AppHandle) -> Result<LibraryStats, String> {
             .map_err(|e| e.to_string())?
             .flatten()
             .collect();
-        raw.into_iter().map(|(label, count)| BreakdownItem { label, count }).collect()
+        raw.into_iter()
+            .map(|(label, count)| BreakdownItem { label, count })
+            .collect()
     };
 
     // ── genre breakdown (via json_each) ──────────────────────────────────────
@@ -1545,7 +1627,9 @@ pub fn get_library_stats(app: &AppHandle) -> Result<LibraryStats, String> {
             .map_err(|e| e.to_string())?
             .flatten()
             .collect();
-        raw.into_iter().map(|(label, count)| BreakdownItem { label, count }).collect()
+        raw.into_iter()
+            .map(|(label, count)| BreakdownItem { label, count })
+            .collect()
     };
 
     Ok(LibraryStats {
@@ -1592,16 +1676,16 @@ pub fn get_activity_log(app: &AppHandle, limit: i64) -> Result<Vec<ActivityEntry
     let entries = stmt
         .query_map([limit], |r| {
             Ok(ActivityEntry {
-                id:            r.get(0)?,
-                media_id:      r.get(1)?,
-                media_type:    r.get(2)?,
-                title:         r.get(3)?,
-                cover_image:   r.get(4)?,
+                id: r.get(0)?,
+                media_id: r.get(1)?,
+                media_type: r.get(2)?,
+                title: r.get(3)?,
+                cover_image: r.get(4)?,
                 activity_type: r.get(5)?,
-                old_value:     r.get(6)?,
-                new_value:     r.get(7)?,
-                note:          r.get(8)?,
-                created_at:    r.get(9)?,
+                old_value: r.get(6)?,
+                new_value: r.get(7)?,
+                note: r.get(8)?,
+                created_at: r.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1617,8 +1701,10 @@ pub fn get_activity_heatmap(app: &AppHandle, year: Option<i32>) -> Result<Vec<He
     let conn = open_connection(&database_path)?;
 
     let selected_year = year.unwrap_or_else(|| {
-        conn.query_row("SELECT CAST(strftime('%Y', 'now') AS INTEGER)", [], |r| r.get::<_, i32>(0))
-            .unwrap_or(1970)
+        conn.query_row("SELECT CAST(strftime('%Y', 'now') AS INTEGER)", [], |r| {
+            r.get::<_, i32>(0)
+        })
+        .unwrap_or(1970)
     });
     let start = format!("{selected_year:04}-01-01");
     let end = format!("{selected_year:04}-12-31");
@@ -1643,7 +1729,12 @@ pub fn get_activity_heatmap(app: &AppHandle, year: Option<i32>) -> Result<Vec<He
         .map_err(|e| e.to_string())?;
 
     let days = stmt
-        .query_map([start, end], |r| Ok(HeatmapDay { date: r.get(0)?, count: r.get(1)? }))
+        .query_map([start, end], |r| {
+            Ok(HeatmapDay {
+                date: r.get(0)?,
+                count: r.get(1)?,
+            })
+        })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
@@ -1652,7 +1743,11 @@ pub fn get_activity_heatmap(app: &AppHandle, year: Option<i32>) -> Result<Vec<He
 }
 
 /// Returns list-entry update rows for a specific date (`YYYY-MM-DD`).
-pub fn get_activity_log_by_date(app: &AppHandle, date: &str, limit: i64) -> Result<Vec<ActivityEntry>, String> {
+pub fn get_activity_log_by_date(
+    app: &AppHandle,
+    date: &str,
+    limit: i64,
+) -> Result<Vec<ActivityEntry>, String> {
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
 
@@ -1701,16 +1796,16 @@ pub fn get_activity_log_by_date(app: &AppHandle, date: &str, limit: i64) -> Resu
     let entries = stmt
         .query_map(rusqlite::params![date, limit], |r| {
             Ok(ActivityEntry {
-                id:            r.get(0)?,
-                media_id:      r.get(1)?,
-                media_type:    r.get(2)?,
-                title:         r.get(3)?,
-                cover_image:   r.get(4)?,
+                id: r.get(0)?,
+                media_id: r.get(1)?,
+                media_type: r.get(2)?,
+                title: r.get(3)?,
+                cover_image: r.get(4)?,
                 activity_type: r.get(5)?,
-                old_value:     r.get(6)?,
-                new_value:     r.get(7)?,
-                note:          r.get(8)?,
-                created_at:    r.get(9)?,
+                old_value: r.get(6)?,
+                new_value: r.get(7)?,
+                note: r.get(8)?,
+                created_at: r.get(9)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -1721,7 +1816,10 @@ pub fn get_activity_log_by_date(app: &AppHandle, date: &str, limit: i64) -> Resu
 }
 
 /// Returns per-month list-entry update counts by media type and update date.
-pub fn get_activity_monthly_totals(app: &AppHandle, year: i32) -> Result<Vec<MonthlyActivityCount>, String> {
+pub fn get_activity_monthly_totals(
+    app: &AppHandle,
+    year: i32,
+) -> Result<Vec<MonthlyActivityCount>, String> {
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
 
@@ -1789,24 +1887,27 @@ pub fn get_activity_monthly_totals(app: &AppHandle, year: i32) -> Result<Vec<Mon
 }
 
 /// Returns annual wrap-up aggregates for the selected year.
-pub fn get_annual_wrap_up(app: &AppHandle, year: i32) -> Result<crate::models::AnnualWrapUp, String> {
-        let database_path = database_path(app)?;
-        let conn = open_connection(&database_path)?;
+pub fn get_annual_wrap_up(
+    app: &AppHandle,
+    year: i32,
+) -> Result<crate::models::AnnualWrapUp, String> {
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
 
-        let start = format!("{year:04}-01-01");
-        let end = format!("{year:04}-12-31");
+    let start = format!("{year:04}-01-01");
+    let end = format!("{year:04}-12-31");
 
-        let (days_active, list_updates): (i64, i64) = conn
-                .query_row(
-                        "SELECT COALESCE(COUNT(DISTINCT DATE(created_at)), 0), COALESCE(COUNT(*), 0)
+    let (days_active, list_updates): (i64, i64) = conn
+        .query_row(
+            "SELECT COALESCE(COUNT(DISTINCT DATE(created_at)), 0), COALESCE(COUNT(*), 0)
                          FROM activity_log
                          WHERE DATE(created_at) BETWEEN DATE(?1) AND DATE(?2)",
-                        rusqlite::params![start, end],
-                        |r| Ok((r.get(0)?, r.get(1)?)),
-                )
-                .map_err(|e| e.to_string())?;
+            rusqlite::params![start, end],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|e| e.to_string())?;
 
-        let (completed_anime, episodes_watched, chapters_read, mean_score): (i64, i64, i64, Option<f64>) = conn
+    let (completed_anime, episodes_watched, chapters_read, mean_score): (i64, i64, i64, Option<f64>) = conn
                 .query_row(
                         "WITH base AS (
                                 SELECT
@@ -1843,8 +1944,8 @@ pub fn get_annual_wrap_up(app: &AppHandle, year: i32) -> Result<crate::models::A
                 )
                 .map_err(|e| e.to_string())?;
 
-        let top_genres = {
-                let mut stmt = conn
+    let top_genres = {
+        let mut stmt = conn
                         .prepare(
                                 "WITH base AS (
                                         SELECT
@@ -1870,18 +1971,20 @@ pub fn get_annual_wrap_up(app: &AppHandle, year: i32) -> Result<crate::models::A
                         )
                         .map_err(|e| e.to_string())?;
 
-                let raw: Vec<(String, i64)> = stmt
-                        .query_map(rusqlite::params![start, end], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))
-                        .map_err(|e| e.to_string())?
-                        .flatten()
-                        .collect();
+        let raw: Vec<(String, i64)> = stmt
+            .query_map(rusqlite::params![start, end], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .collect();
 
-                raw.into_iter()
-                        .map(|(label, count)| crate::models::BreakdownItem { label, count })
-                        .collect::<Vec<_>>()
-        };
+        raw.into_iter()
+            .map(|(label, count)| crate::models::BreakdownItem { label, count })
+            .collect::<Vec<_>>()
+    };
 
-        let top_studio: Option<String> = conn
+    let top_studio: Option<String> = conn
                 .query_row(
                         "WITH base AS (
                                 SELECT
@@ -1913,35 +2016,35 @@ pub fn get_annual_wrap_up(app: &AppHandle, year: i32) -> Result<crate::models::A
                 .map_err(|e| e.to_string())?
                 .flatten();
 
-        let weekday_code: Option<String> = conn
-                .query_row(
-                        "SELECT strftime('%w', created_at) AS weekday
+    let weekday_code: Option<String> = conn
+        .query_row(
+            "SELECT strftime('%w', created_at) AS weekday
                          FROM activity_log
                          WHERE DATE(created_at) BETWEEN DATE(?1) AND DATE(?2)
                          GROUP BY weekday
                          ORDER BY COUNT(*) DESC
                          LIMIT 1",
-                        rusqlite::params![start, end],
-                        |r| r.get(0),
-                )
-                .optional()
-                .map_err(|e| e.to_string())?
-                .flatten();
+            rusqlite::params![start, end],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
 
-        let most_watched_weekday = weekday_code.and_then(|w| {
-                Some(match w.as_str() {
-                        "0" => "Sunday".to_string(),
-                        "1" => "Monday".to_string(),
-                        "2" => "Tuesday".to_string(),
-                        "3" => "Wednesday".to_string(),
-                        "4" => "Thursday".to_string(),
-                        "5" => "Friday".to_string(),
-                        "6" => "Saturday".to_string(),
-                        _ => return None,
-                })
-        });
+    let most_watched_weekday = weekday_code.and_then(|w| {
+        Some(match w.as_str() {
+            "0" => "Sunday".to_string(),
+            "1" => "Monday".to_string(),
+            "2" => "Tuesday".to_string(),
+            "3" => "Wednesday".to_string(),
+            "4" => "Thursday".to_string(),
+            "5" => "Friday".to_string(),
+            "6" => "Saturday".to_string(),
+            _ => return None,
+        })
+    });
 
-        let first_completed_title: Option<String> = conn
+    let first_completed_title: Option<String> = conn
                 .query_row(
                         "SELECT COALESCE(mc.title_english, mc.title_romaji, 'Unknown')
                          FROM media_list_entries mle
@@ -1958,7 +2061,7 @@ pub fn get_annual_wrap_up(app: &AppHandle, year: i32) -> Result<crate::models::A
                 .map_err(|e| e.to_string())?
                 .flatten();
 
-        let last_completed_title: Option<String> = conn
+    let last_completed_title: Option<String> = conn
                 .query_row(
                         "SELECT COALESCE(mc.title_english, mc.title_romaji, 'Unknown')
                          FROM media_list_entries mle
@@ -1975,20 +2078,20 @@ pub fn get_annual_wrap_up(app: &AppHandle, year: i32) -> Result<crate::models::A
                 .map_err(|e| e.to_string())?
                 .flatten();
 
-        Ok(crate::models::AnnualWrapUp {
-                year: year as i64,
-                days_active,
-                list_updates,
-                completed_anime,
-                episodes_watched,
-                chapters_read,
-                mean_score,
-                top_genres,
-                top_studio,
-                most_watched_weekday,
-                first_completed_title,
-                last_completed_title,
-        })
+    Ok(crate::models::AnnualWrapUp {
+        year: year as i64,
+        days_active,
+        list_updates,
+        completed_anime,
+        episodes_watched,
+        chapters_read,
+        mean_score,
+        top_genres,
+        top_studio,
+        most_watched_weekday,
+        first_completed_title,
+        last_completed_title,
+    })
 }
 
 // ─── App settings ─────────────────────────────────────────────────────────────
@@ -2010,15 +2113,15 @@ pub fn get_app_settings(app: &AppHandle) -> Result<AppSettings, String> {
 
     for (key, value) in rows {
         match key.as_str() {
-            "show_adult_content"  => settings.show_adult_content  = value == "1",
-            "default_list_tab"   => settings.default_list_tab    = value,
-            "default_sort"       => settings.default_sort        = value,
-            "library_view"       => settings.library_view        = value,
-            "schedule_view"      => settings.schedule_view       = value,
-            "hidden_statuses"    => settings.hidden_statuses     = value,
-            "auto_sync_interval" => settings.auto_sync_interval  = value.parse().unwrap_or(15),
-            "last_synced_at"     => settings.last_synced_at      = Some(value),
-            "score_format"       => settings.score_format        = value,
+            "show_adult_content" => settings.show_adult_content = value == "1",
+            "default_list_tab" => settings.default_list_tab = value,
+            "default_sort" => settings.default_sort = value,
+            "library_view" => settings.library_view = value,
+            "schedule_view" => settings.schedule_view = value,
+            "hidden_statuses" => settings.hidden_statuses = value,
+            "auto_sync_interval" => settings.auto_sync_interval = value.parse().unwrap_or(15),
+            "last_synced_at" => settings.last_synced_at = Some(value),
+            "score_format" => settings.score_format = value,
             "minimize_to_tray_on_close" => settings.minimize_to_tray_on_close = value == "1",
             _ => {}
         }
@@ -2033,17 +2136,28 @@ pub fn save_app_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), 
 
     let interval_str = settings.auto_sync_interval.to_string();
     let mut pairs: Vec<(&str, &str)> = vec![
-        ("show_adult_content", if settings.show_adult_content { "1" } else { "0" }),
-        ("default_list_tab",  settings.default_list_tab.as_str()),
-        ("default_sort",      settings.default_sort.as_str()),
-        ("library_view",      settings.library_view.as_str()),
-        ("schedule_view",     settings.schedule_view.as_str()),
-        ("hidden_statuses",   settings.hidden_statuses.as_str()),
+        (
+            "show_adult_content",
+            if settings.show_adult_content {
+                "1"
+            } else {
+                "0"
+            },
+        ),
+        ("default_list_tab", settings.default_list_tab.as_str()),
+        ("default_sort", settings.default_sort.as_str()),
+        ("library_view", settings.library_view.as_str()),
+        ("schedule_view", settings.schedule_view.as_str()),
+        ("hidden_statuses", settings.hidden_statuses.as_str()),
         ("auto_sync_interval", interval_str.as_str()),
-        ("score_format",      settings.score_format.as_str()),
+        ("score_format", settings.score_format.as_str()),
         (
             "minimize_to_tray_on_close",
-            if settings.minimize_to_tray_on_close { "1" } else { "0" },
+            if settings.minimize_to_tray_on_close {
+                "1"
+            } else {
+                "0"
+            },
         ),
     ];
     // Only persist last_synced_at if set — we never erase it via settings save.
@@ -2153,12 +2267,12 @@ pub fn get_sync_log(app: &AppHandle, limit: i64) -> Result<Vec<SyncLogEntry>, St
     let rows = stmt
         .query_map([limit], |row| {
             Ok(SyncLogEntry {
-                id:          row.get(0)?,
-                media_id:    row.get(1)?,
+                id: row.get(0)?,
+                media_id: row.get(1)?,
                 media_title: row.get(2)?,
-                sync_type:   row.get(3)?,
-                detail:      row.get(4)?,
-                created_at:  row.get(5)?,
+                sync_type: row.get(3)?,
+                detail: row.get(4)?,
+                created_at: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -2173,6 +2287,7 @@ pub fn get_sync_log(app: &AppHandle, limit: i64) -> Result<Vec<SyncLogEntry>, St
 /// Save both sides of a conflict to `pending_conflicts` so the user can choose
 /// which version to keep.  Uses `ON CONFLICT` to update if the entry was already
 /// recorded from a previous sync run.
+#[allow(clippy::too_many_arguments)]
 pub fn store_pending_conflict(
     conn: &Connection,
     media_id: i64,
@@ -2204,9 +2319,16 @@ pub fn store_pending_conflict(
            remote_notes    = excluded.remote_notes,
            detected_at     = CURRENT_TIMESTAMP",
         rusqlite::params![
-            media_id, media_type,
-            local_status, local_score, local_progress, local_notes,
-            remote_status, remote_score, remote_progress, remote_notes,
+            media_id,
+            media_type,
+            local_status,
+            local_score,
+            local_progress,
+            local_notes,
+            remote_status,
+            remote_score,
+            remote_progress,
+            remote_notes,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -2234,18 +2356,18 @@ pub fn get_pending_conflicts(app: &AppHandle) -> Result<Vec<PendingConflict>, St
     let rows = stmt
         .query_map([], |row| {
             Ok(PendingConflict {
-                media_id:        row.get(0)?,
-                media_type:      row.get(1)?,
-                media_title:     row.get(2)?,
-                local_status:    row.get(3)?,
-                local_score:     row.get(4)?,
-                local_progress:  row.get(5)?,
-                local_notes:     row.get(6)?,
-                remote_status:   row.get(7)?,
-                remote_score:    row.get(8)?,
+                media_id: row.get(0)?,
+                media_type: row.get(1)?,
+                media_title: row.get(2)?,
+                local_status: row.get(3)?,
+                local_score: row.get(4)?,
+                local_progress: row.get(5)?,
+                local_notes: row.get(6)?,
+                remote_status: row.get(7)?,
+                remote_score: row.get(8)?,
                 remote_progress: row.get(9)?,
-                remote_notes:    row.get(10)?,
-                detected_at:     row.get(11)?,
+                remote_notes: row.get(10)?,
+                detected_at: row.get(11)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -2272,6 +2394,7 @@ pub fn apply_conflict_resolution(
     let conn = open_connection(&database_path)?;
 
     if use_remote {
+        #[allow(clippy::type_complexity)]
         let row: Option<(String, Option<String>, Option<f64>, i64, Option<String>)> = conn
             .query_row(
                 "SELECT media_type, remote_status, remote_score,
@@ -2318,13 +2441,14 @@ pub fn get_cache_stats(app: &AppHandle) -> Result<CacheStats, String> {
     let conn = open_connection(&database_path)?;
 
     let count = |sql: &str| -> Result<i64, String> {
-        conn.query_row(sql, [], |r| r.get(0)).map_err(|e| e.to_string())
+        conn.query_row(sql, [], |r| r.get(0))
+            .map_err(|e| e.to_string())
     };
 
-    let media_cache_count     = count("SELECT COUNT(*) FROM media_cache")?;
-    let search_history_count  = count("SELECT COUNT(*) FROM search_history")?;
-    let airing_cache_count    = count("SELECT COUNT(*) FROM airing_cache")?;
-    let activity_log_count    = count("SELECT COUNT(*) FROM activity_log")?;
+    let media_cache_count = count("SELECT COUNT(*) FROM media_cache")?;
+    let search_history_count = count("SELECT COUNT(*) FROM search_history")?;
+    let airing_cache_count = count("SELECT COUNT(*) FROM airing_cache")?;
+    let activity_log_count = count("SELECT COUNT(*) FROM activity_log")?;
 
     let (image_cache_count, image_cache_bytes) =
         crate::cache::image_cache_stats(app).unwrap_or((0, 0));
@@ -2342,7 +2466,8 @@ pub fn get_cache_stats(app: &AppHandle) -> Result<CacheStats, String> {
 pub fn clear_search_history(app: &AppHandle) -> Result<(), String> {
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
-    conn.execute("DELETE FROM search_history", []).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM search_history", [])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -2363,7 +2488,8 @@ pub fn clear_orphan_media_cache(app: &AppHandle) -> Result<i64, String> {
 pub fn clear_airing_cache(app: &AppHandle) -> Result<(), String> {
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
-    conn.execute("DELETE FROM airing_cache", []).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM airing_cache", [])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -2430,9 +2556,9 @@ pub fn export_library_json(app: &AppHandle) -> Result<ExportResult, String> {
 
     // Write to exports dir.
     let export_dir = export_directory(app)?;
-    let timestamp  = chrono_now_file_safe();
-    let filename   = format!("library_{timestamp}.json");
-    let file_path  = export_dir.join(&filename);
+    let timestamp = chrono_now_file_safe();
+    let filename = format!("library_{timestamp}.json");
+    let file_path = export_dir.join(&filename);
 
     let json = serde_json::to_string_pretty(&payload).map_err(|e| e.to_string())?;
     std::fs::write(&file_path, json).map_err(|e| e.to_string())?;
@@ -2446,10 +2572,10 @@ pub fn export_library_json(app: &AppHandle) -> Result<ExportResult, String> {
 /// Copies the live SQLite database to the exports directory.
 pub fn export_database_backup(app: &AppHandle) -> Result<ExportResult, String> {
     let database_path = database_path(app)?;
-    let export_dir    = export_directory(app)?;
-    let timestamp     = chrono_now_file_safe();
-    let filename      = format!("miyolist_{timestamp}.sqlite3");
-    let dest          = export_dir.join(&filename);
+    let export_dir = export_directory(app)?;
+    let timestamp = chrono_now_file_safe();
+    let filename = format!("miyolist_{timestamp}.sqlite3");
+    let dest = export_dir.join(&filename);
 
     std::fs::copy(&database_path, &dest).map_err(|e| e.to_string())?;
 
@@ -2463,8 +2589,7 @@ pub fn export_database_backup(app: &AppHandle) -> Result<ExportResult, String> {
 /// Existing entries (same media_id + media_type + list_kind) are skipped.
 pub fn import_library_json(app: &AppHandle, path: String) -> Result<ImportResult, String> {
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let payload: serde_json::Value =
-        serde_json::from_str(&content).map_err(|e| e.to_string())?;
+    let payload: serde_json::Value = serde_json::from_str(&content).map_err(|e| e.to_string())?;
 
     let entries = payload["entries"]
         .as_array()
@@ -2474,23 +2599,23 @@ pub fn import_library_json(app: &AppHandle, path: String) -> Result<ImportResult
     let conn = open_connection(&database_path)?;
 
     let mut imported = 0i64;
-    let mut skipped  = 0i64;
+    let mut skipped = 0i64;
     let mut errors: Vec<String> = Vec::new();
 
     for entry in entries {
-        let media_id   = entry["mediaId"].as_i64().unwrap_or(0);
+        let media_id = entry["mediaId"].as_i64().unwrap_or(0);
         let media_type = entry["mediaType"].as_str().unwrap_or("ANIME");
-        let list_kind  = entry["listKind"].as_str().unwrap_or("ANIME");
-        let status     = entry["status"].as_str().unwrap_or("PLANNING");
-        let score      = entry["score"].as_f64();
-        let progress   = entry["progress"].as_i64().unwrap_or(0);
+        let list_kind = entry["listKind"].as_str().unwrap_or("ANIME");
+        let status = entry["status"].as_str().unwrap_or("PLANNING");
+        let score = entry["score"].as_f64();
+        let progress = entry["progress"].as_i64().unwrap_or(0);
         let progress_v = entry["progressVolumes"].as_i64().unwrap_or(0);
-        let repeat_c   = entry["repeatCount"].as_i64().unwrap_or(0);
-        let notes      = entry["notes"].as_str();
-        let started    = entry["startedAt"].as_str();
-        let completed  = entry["completedAt"].as_str();
-        let updated    = entry["updatedAt"].as_str().unwrap_or("CURRENT_TIMESTAMP");
-        let al_id      = entry["anilistEntryId"].as_i64();
+        let repeat_c = entry["repeatCount"].as_i64().unwrap_or(0);
+        let notes = entry["notes"].as_str();
+        let started = entry["startedAt"].as_str();
+        let completed = entry["completedAt"].as_str();
+        let updated = entry["updatedAt"].as_str().unwrap_or("CURRENT_TIMESTAMP");
+        let al_id = entry["anilistEntryId"].as_i64();
 
         if media_id == 0 {
             errors.push("Skipped entry with missing mediaId".into());
@@ -2505,12 +2630,12 @@ pub fn import_library_json(app: &AppHandle, path: String) -> Result<ImportResult
               is_dirty, source)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,1,'import')",
             rusqlite::params![
-                media_id, media_type, list_kind, status, score, progress,
-                progress_v, repeat_c, notes, started, completed, updated, al_id,
+                media_id, media_type, list_kind, status, score, progress, progress_v, repeat_c,
+                notes, started, completed, updated, al_id,
             ],
         ) {
             Ok(rows) if rows > 0 => imported += 1,
-            Ok(_)  => skipped += 1,
+            Ok(_) => skipped += 1,
             Err(e) => {
                 errors.push(format!("media_id={media_id}: {e}"));
                 skipped += 1;
@@ -2518,14 +2643,18 @@ pub fn import_library_json(app: &AppHandle, path: String) -> Result<ImportResult
         }
     }
 
-    Ok(ImportResult { imported_count: imported, skipped_count: skipped, errors })
+    Ok(ImportResult {
+        imported_count: imported,
+        skipped_count: skipped,
+        errors,
+    })
 }
 
 // ─── Local helpers ────────────────────────────────────────────────────────────
 
 fn export_directory(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
-    let dir  = base.join("exports");
+    let dir = base.join("exports");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }

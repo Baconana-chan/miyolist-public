@@ -762,7 +762,6 @@ pub(super) struct UserProfileNode {
     pub statistics: Option<UserStatsNode>,
 }
 
-
 #[derive(Deserialize)]
 pub(super) struct UserStatsNode {
     pub anime: Option<UserAnimeStats>,
@@ -770,6 +769,7 @@ pub(super) struct UserStatsNode {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub(super) struct UserAnimeStats {
     pub count: i64,
     #[serde(rename = "episodesWatched")]
@@ -781,6 +781,7 @@ pub(super) struct UserAnimeStats {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub(super) struct UserMangaStats {
     pub count: i64,
     #[serde(rename = "chaptersRead")]
@@ -1029,6 +1030,7 @@ pub(super) struct ToggleLikePayload {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 pub(super) struct ToggleLikeNode {
     pub id: i64,
     #[serde(rename = "isLiked")]

@@ -1,15 +1,14 @@
 use tauri::AppHandle;
 
 use crate::models::{
-    ActivityEntry, AiringEntry, AniListConfigStatus, AniListNotificationItem, AniListViewer, AppSettings, AuthRequestPlan,
-    AnnualWrapUp, AuthSessionStatus, BootstrapPayload, CacheStats, CharacterDetails, DatabaseInitResult,
-    FollowingActivityItem,
-    DatabaseOverview, ExportResult, GlobalAiringEntry, HeatmapDay, ImportResult, LibrarySnapshot, LibraryStats,
-    MonthlyActivityCount,
-    ListEntry, MediaDetails, MediaSearchResult, NotificationOverride, NotificationSettings, PersonSearchResult,
-    SocialUser,
-    PendingConflict, StaffDetails, StudioDetails, StudioSearchResult, SyncLogEntry, SyncSummary, UserFavorites,
-    UserMediaListItem, UserProfile, UserSearchResult,
+    ActivityEntry, AiringEntry, AniListConfigStatus, AniListNotificationItem, AniListViewer,
+    AnnualWrapUp, AppSettings, AuthRequestPlan, AuthSessionStatus, BootstrapPayload, CacheStats,
+    CharacterDetails, DatabaseInitResult, DatabaseOverview, ExportResult, FollowingActivityItem,
+    GlobalAiringEntry, HeatmapDay, ImportResult, LibrarySnapshot, LibraryStats, ListEntry,
+    MediaDetails, MediaSearchResult, MonthlyActivityCount, NotificationOverride,
+    NotificationSettings, PendingConflict, PersonSearchResult, SocialUser, StaffDetails,
+    StudioDetails, StudioSearchResult, SyncLogEntry, SyncSummary, UserFavorites, UserMediaListItem,
+    UserProfile, UserSearchResult,
 };
 
 #[tauri::command]
@@ -63,12 +62,20 @@ pub fn get_viewer(app: AppHandle) -> Result<AniListViewer, String> {
 }
 
 #[tauri::command]
-pub fn toggle_media_favorite(app: AppHandle, media_id: i64, media_type: String) -> Result<bool, String> {
+pub fn toggle_media_favorite(
+    app: AppHandle,
+    media_id: i64,
+    media_type: String,
+) -> Result<bool, String> {
     crate::anilist::toggle_media_favorite(&app, media_id, &media_type)
 }
 
 #[tauri::command]
-pub fn toggle_favorite(app: AppHandle, target_id: i64, target_type: String) -> Result<bool, String> {
+pub fn toggle_favorite(
+    app: AppHandle,
+    target_id: i64,
+    target_type: String,
+) -> Result<bool, String> {
     crate::anilist::toggle_favorite(&app, target_id, &target_type)
 }
 
@@ -78,7 +85,10 @@ pub fn get_auth_session_status(app: AppHandle) -> Result<AuthSessionStatus, Stri
 }
 
 #[tauri::command]
-pub fn store_access_token(app: AppHandle, access_token: String) -> Result<AuthSessionStatus, String> {
+pub fn store_access_token(
+    app: AppHandle,
+    access_token: String,
+) -> Result<AuthSessionStatus, String> {
     crate::anilist::store_access_token(&app, &access_token)
 }
 
@@ -147,11 +157,15 @@ pub fn get_list_entries(
 }
 
 #[tauri::command]
-pub fn get_list_entry_by_media_id(app: AppHandle, media_id: i64) -> Result<Option<ListEntry>, String> {
+pub fn get_list_entry_by_media_id(
+    app: AppHandle,
+    media_id: i64,
+) -> Result<Option<ListEntry>, String> {
     crate::db::get_list_entry_by_media_id(&app, media_id)
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn update_list_entry(
     app: AppHandle,
     local_id: i64,
@@ -167,17 +181,37 @@ pub fn update_list_entry(
     custom_lists: Option<Vec<String>>,
 ) -> Result<(), String> {
     crate::db::update_list_entry_local(
-        &app, local_id, &status, score, progress,
-        progress_volumes, repeat_count,
-        start_date.clone(), completed_date.clone(), notes.clone(), custom_lists.clone(),
+        &app,
+        local_id,
+        &status,
+        score,
+        progress,
+        progress_volumes,
+        repeat_count,
+        start_date.clone(),
+        completed_date.clone(),
+        notes.clone(),
+        custom_lists.clone(),
     )?;
     match crate::anilist::save_media_list_entry(
-        &app, media_id, &status, score, progress,
-        progress_volumes, repeat_count,
-        start_date, completed_date, notes, custom_lists,
+        &app,
+        media_id,
+        &status,
+        score,
+        progress,
+        progress_volumes,
+        repeat_count,
+        start_date,
+        completed_date,
+        notes,
+        custom_lists,
     ) {
-        Ok(()) => { let _ = crate::db::clear_entry_dirty(&app, local_id); }
-        Err(e) => { eprintln!("AniList sync failed for local entry {local_id}: {e}"); }
+        Ok(()) => {
+            let _ = crate::db::clear_entry_dirty(&app, local_id);
+        }
+        Err(e) => {
+            eprintln!("AniList sync failed for local entry {local_id}: {e}");
+        }
     }
     Ok(())
 }
@@ -192,13 +226,16 @@ pub fn delete_list_entry(
     if let Some(anilist_id) = anilist_entry_id {
         match crate::anilist::delete_media_list_entry(&app, anilist_id) {
             Ok(()) => {}
-            Err(e) => { eprintln!("AniList delete failed for entry {anilist_id}: {e}"); }
+            Err(e) => {
+                eprintln!("AniList delete failed for entry {anilist_id}: {e}");
+            }
         }
     }
     Ok(())
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn search_media(
     app: AppHandle,
     query: String,
@@ -216,11 +253,20 @@ pub fn search_media(
     is_adult: Option<bool>,
 ) -> Result<Vec<MediaSearchResult>, String> {
     crate::anilist::search_media(
-        &app, &query, &media_type,
-        genres_in, genres_not_in,
-        tags_in, tags_not_in,
-        format_in, status_filter, sort,
-        year_greater, year_lesser, minimum_tag_rank, is_adult,
+        &app,
+        &query,
+        &media_type,
+        genres_in,
+        genres_not_in,
+        tags_in,
+        tags_not_in,
+        format_in,
+        status_filter,
+        sort,
+        year_greater,
+        year_lesser,
+        minimum_tag_rank,
+        is_adult,
     )
 }
 
@@ -246,9 +292,13 @@ pub fn add_to_library(
         title.as_deref(),
         cover_image.as_deref(),
     )?;
-    match crate::anilist::save_media_list_entry(&app, media_id, &status, None, 0, 0, 0, None, None, None, None) {
+    match crate::anilist::save_media_list_entry(
+        &app, media_id, &status, None, 0, 0, 0, None, None, None, None,
+    ) {
         Ok(()) => {}
-        Err(e) => { eprintln!("AniList add failed for media {media_id}: {e}"); }
+        Err(e) => {
+            eprintln!("AniList add failed for media {media_id}: {e}");
+        }
     }
     Ok(())
 }
@@ -264,7 +314,10 @@ pub fn reopen_auth_browser(app: AppHandle, auth_url: String) -> Result<(), Strin
 }
 
 #[tauri::command]
-pub fn submit_auth_code_manually(app: AppHandle, code: String) -> Result<AuthSessionStatus, String> {
+pub fn submit_auth_code_manually(
+    app: AppHandle,
+    code: String,
+) -> Result<AuthSessionStatus, String> {
     crate::auth::submit_auth_code_manually(&app, &code)?;
     crate::anilist::get_auth_session_status(&app)
 }
@@ -282,7 +335,10 @@ pub fn get_airing_schedule(app: AppHandle) -> Result<Vec<AiringEntry>, String> {
 }
 
 #[tauri::command]
-pub fn get_global_airing_schedule(app: AppHandle, weekday: Option<u8>) -> Result<Vec<GlobalAiringEntry>, String> {
+pub fn get_global_airing_schedule(
+    app: AppHandle,
+    weekday: Option<u8>,
+) -> Result<Vec<GlobalAiringEntry>, String> {
     if !crate::anilist::is_online() {
         return Ok(Vec::new());
     }
@@ -296,8 +352,10 @@ pub fn refresh_airing_schedule(app: AppHandle) -> Result<i64, String> {
     if !crate::anilist::is_online() {
         return Ok(0);
     }
-    let stored = crate::anilist::fetch_airing_schedule(&app)
-        .unwrap_or_else(|e| { eprintln!("[AIRING_FETCH] {e}"); 0 });
+    let stored = crate::anilist::fetch_airing_schedule(&app).unwrap_or_else(|e| {
+        eprintln!("[AIRING_FETCH] {e}");
+        0
+    });
     let _ = crate::notifications::check_and_send_pending(&app);
     Ok(stored)
 }
@@ -408,7 +466,10 @@ pub fn get_activity_log_by_date(
 
 /// Monthly episode/chapter totals for progress updates in a selected year.
 #[tauri::command]
-pub fn get_activity_monthly_totals(app: AppHandle, year: i32) -> Result<Vec<MonthlyActivityCount>, String> {
+pub fn get_activity_monthly_totals(
+    app: AppHandle,
+    year: i32,
+) -> Result<Vec<MonthlyActivityCount>, String> {
     crate::db::get_activity_monthly_totals(&app, year)
 }
 
@@ -551,22 +612,38 @@ pub fn toggle_follow(app: AppHandle, user_id: i64, follow: bool) -> Result<bool,
 }
 
 #[tauri::command]
-pub fn get_following(app: AppHandle, user_id: i64, page: Option<i64>) -> Result<Vec<SocialUser>, String> {
+pub fn get_following(
+    app: AppHandle,
+    user_id: i64,
+    page: Option<i64>,
+) -> Result<Vec<SocialUser>, String> {
     crate::anilist::get_following(&app, user_id, page.unwrap_or(1))
 }
 
 #[tauri::command]
-pub fn get_followers(app: AppHandle, user_id: i64, page: Option<i64>) -> Result<Vec<SocialUser>, String> {
+pub fn get_followers(
+    app: AppHandle,
+    user_id: i64,
+    page: Option<i64>,
+) -> Result<Vec<SocialUser>, String> {
     crate::anilist::get_followers(&app, user_id, page.unwrap_or(1))
 }
 
 #[tauri::command]
-pub fn get_following_activity(app: AppHandle, page: Option<i64>, per_page: Option<i64>) -> Result<Vec<FollowingActivityItem>, String> {
+pub fn get_following_activity(
+    app: AppHandle,
+    page: Option<i64>,
+    per_page: Option<i64>,
+) -> Result<Vec<FollowingActivityItem>, String> {
     crate::anilist::get_following_activity(&app, page.unwrap_or(1), per_page.unwrap_or(25))
 }
 
 #[tauri::command]
-pub fn get_global_activity(app: AppHandle, page: Option<i64>, per_page: Option<i64>) -> Result<Vec<FollowingActivityItem>, String> {
+pub fn get_global_activity(
+    app: AppHandle,
+    page: Option<i64>,
+    per_page: Option<i64>,
+) -> Result<Vec<FollowingActivityItem>, String> {
     crate::anilist::get_global_activity(&app, page.unwrap_or(1), per_page.unwrap_or(25))
 }
 
@@ -581,7 +658,11 @@ pub fn save_activity_reply(app: AppHandle, activity_id: i64, text: String) -> Re
 }
 
 #[tauri::command]
-pub fn get_user_media_list(app: AppHandle, user_id: i64, media_type: String) -> Result<Vec<UserMediaListItem>, String> {
+pub fn get_user_media_list(
+    app: AppHandle,
+    user_id: i64,
+    media_type: String,
+) -> Result<Vec<UserMediaListItem>, String> {
     crate::anilist::get_user_media_list(&app, user_id, &media_type)
 }
 

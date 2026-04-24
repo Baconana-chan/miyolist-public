@@ -40,11 +40,7 @@ pub fn check_and_send_pending(app: &AppHandle) -> Result<i64, String> {
             .as_deref()
             .and_then(|url| crate::cache::get_cached_image_path(app, url).ok().flatten());
 
-        let mut builder = app
-            .notification()
-            .builder()
-            .title(&title)
-            .body(&body);
+        let mut builder = app.notification().builder().title(&title).body(&body);
         if let Some(icon) = icon_path.as_deref() {
             builder = builder.icon(icon);
         }

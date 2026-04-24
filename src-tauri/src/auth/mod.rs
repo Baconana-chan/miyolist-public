@@ -69,7 +69,8 @@ pub fn foundation_summary() -> FoundationModule {
 pub fn auth_strategy() -> Vec<String> {
     vec![
         "Use an external browser with a local localhost callback handled by Tauri.".into(),
-        "Do not depend on a website bridge or Cloudflare Pages middleware for auth return flow.".into(),
+        "Do not depend on a website bridge or Cloudflare Pages middleware for auth return flow."
+            .into(),
         "Treat manual code paste as a fallback, not the main path.".into(),
         "Expose timeout, retry, and callback failures clearly in the UI and logs.".into(),
     ]
@@ -154,7 +155,9 @@ fn callback_listener_state() -> &'static Mutex<CallbackListenerState> {
 
 fn ensure_callback_listener(app: &AppHandle) -> Result<(), String> {
     let state = callback_listener_state();
-    let mut guard = state.lock().map_err(|_| "Callback listener state is poisoned".to_string())?;
+    let mut guard = state
+        .lock()
+        .map_err(|_| "Callback listener state is poisoned".to_string())?;
 
     match &*guard {
         CallbackListenerState::Running { .. } => return Ok(()),
@@ -171,7 +174,9 @@ fn ensure_callback_listener(app: &AppHandle) -> Result<(), String> {
         message
     })?;
 
-    *guard = CallbackListenerState::Running { started_at: Instant::now() };
+    *guard = CallbackListenerState::Running {
+        started_at: Instant::now(),
+    };
     drop(guard);
 
     let app_handle = app.clone();
@@ -197,14 +202,17 @@ fn run_callback_listener(listener: TcpListener, app: AppHandle) {
 
 fn handle_callback_connection(mut stream: TcpStream, app: &AppHandle) -> Result<(), String> {
     let mut buffer = [0_u8; 8192];
-    let bytes_read = stream.read(&mut buffer).map_err(|error| error.to_string())?;
+    let bytes_read = stream
+        .read(&mut buffer)
+        .map_err(|error| error.to_string())?;
     if bytes_read == 0 {
         return Ok(());
     }
 
     let request = String::from_utf8_lossy(&buffer[..bytes_read]);
     let target = request_target(&request)?;
-    let url = Url::parse(&format!("http://{CALLBACK_HOST}{target}")).map_err(|error| error.to_string())?;
+    let url = Url::parse(&format!("http://{CALLBACK_HOST}{target}"))
+        .map_err(|error| error.to_string())?;
 
     let response = if url.path() != CALLBACK_PATH {
         html_response(
@@ -219,7 +227,9 @@ fn handle_callback_connection(mut stream: TcpStream, app: &AppHandle) -> Result<
         }
     };
 
-    stream.write_all(response.as_bytes()).map_err(|error| error.to_string())?;
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|error| error.to_string())?;
     stream.flush().map_err(|error| error.to_string())?;
 
     Ok(())
@@ -256,19 +266,26 @@ fn handle_callback(app: &AppHandle, url: &Url) -> Result<String, String> {
             .find(|(key, _)| key == "error_description")
             .map(|(_, value)| value.clone())
             .unwrap_or_else(|| "AniList denied the request.".into());
-        return Err(format!("[CALLBACK_ANILIST_DENIED] AniList returned {error}: {description}"));
+        return Err(format!(
+            "[CALLBACK_ANILIST_DENIED] AniList returned {error}: {description}"
+        ));
     }
 
     let code = query
         .iter()
         .find(|(key, _)| key == "code")
         .map(|(_, value)| value.clone())
-        .ok_or_else(|| "[CALLBACK_MISSING_CODE] AniList callback did not include an authorization code.".to_string())?;
+        .ok_or_else(|| {
+            "[CALLBACK_MISSING_CODE] AniList callback did not include an authorization code."
+                .to_string()
+        })?;
     let state = query
         .iter()
         .find(|(key, _)| key == "state")
         .map(|(_, value)| value.clone())
-        .ok_or_else(|| "[CALLBACK_MISSING_STATE] AniList callback did not include an OAuth state.".to_string())?;
+        .ok_or_else(|| {
+            "[CALLBACK_MISSING_STATE] AniList callback did not include an OAuth state.".to_string()
+        })?;
 
     validate_state(app, &state)?;
     crate::anilist::exchange_authorization_code(app, &code)?;
@@ -288,7 +305,9 @@ fn validate_state(app: &AppHandle, state: &str) -> Result<(), String> {
             |row| row.get::<_, Option<String>>(0),
         )
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| "[STATE_NOT_FOUND] No pending OAuth state was stored locally.".to_string())?;
+        .ok_or_else(|| {
+            "[STATE_NOT_FOUND] No pending OAuth state was stored locally.".to_string()
+        })?;
 
     if expected_state != state {
         return Err("[CALLBACK_STATE_MISMATCH] OAuth state mismatch. The callback does not match the latest sign-in attempt.".into());
