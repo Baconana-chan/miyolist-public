@@ -1,4 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
+import { useBackHandler } from "../../shared/hooks/useBackHandler";
 import { getStudioDetails, toggleFavorite } from "../../shared/api/database";
 import { getFavoriteIdCache, isFavoriteEntity, updateFavoriteEntityCache } from "../../shared/favorites";
 import { PanelSkeleton } from "../../shared/components/Skeleton";
@@ -128,6 +129,7 @@ export interface StudioPanelProps {
 }
 
 export function StudioPanel({ studioId, onClose, onMediaClick, embedded = false }: StudioPanelProps) {
+  useBackHandler(!embedded, onClose);
   const [details, setDetails] = useState<StudioDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

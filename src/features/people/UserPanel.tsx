@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "preact/hooks";
+import { useBackHandler } from "../../shared/hooks/useBackHandler";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   getAuthSessionStatus,
@@ -664,6 +665,7 @@ export function UserPanel({
   onOpenUser,
   onRequestSpan,
 }: UserPanelProps) {
+  useBackHandler(!embedded, onClose);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

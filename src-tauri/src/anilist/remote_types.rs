@@ -129,8 +129,11 @@ pub(super) struct DeltaListEntry {
     pub progress_volumes: Option<i64>,
     pub repeat: i64,
     pub notes: Option<String>,
+    /// `customLists(asArray: true)` returns `[{name, enabled}]` — not a flat
+    /// list of strings.  Use `enabled_custom_list_names()` to get the names
+    /// the entry is currently in.
     #[serde(rename = "customLists")]
-    pub custom_lists: Option<Vec<String>>,
+    pub custom_lists: Option<Vec<DeltaCustomListEntry>>,
     #[serde(rename = "startedAt")]
     pub started_at: Option<FuzzyDateNode>,
     #[serde(rename = "completedAt")]
@@ -138,6 +141,30 @@ pub(super) struct DeltaListEntry {
     #[serde(rename = "updatedAt")]
     pub updated_at: i64,
     pub media: DeltaMedia,
+}
+
+/// `customLists(asArray: true)` element shape: `{ name, enabled }`.
+#[derive(Deserialize, Clone)]
+pub(super) struct DeltaCustomListEntry {
+    pub name: String,
+    pub enabled: bool,
+}
+
+impl DeltaListEntry {
+    /// Extract the names of custom lists this entry currently belongs to
+    /// (i.e. `enabled = true`).  Empty when AniList returns nothing.
+    pub fn enabled_custom_list_names(&self) -> Vec<String> {
+        self.custom_lists
+            .as_ref()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter(|c| c.enabled)
+                    .map(|c| c.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Deserialize)]
@@ -154,6 +181,27 @@ pub(super) struct DeltaMedia {
     pub volumes: Option<i64>,
     #[serde(rename = "isAdult")]
     pub is_adult: Option<bool>,
+    /// AniList genre tags. Required for the local genre breakdown / top genres
+    /// statistics (`media_cache.payload_json.genres`).
+    #[serde(default)]
+    pub genres: Vec<String>,
+    /// Per-episode duration in minutes (anime only). Required for the
+    /// estimated-watch-time stat (`media_cache.payload_json.duration`).
+    pub duration: Option<i64>,
+    /// Studios connection — only the studio name is stored locally for the
+    /// "top studio" annual-wrap-up stat.
+    pub studios: Option<DeltaStudioConnection>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct DeltaStudioConnection {
+    #[serde(default)]
+    pub nodes: Vec<DeltaStudioNode>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct DeltaStudioNode {
+    pub name: String,
 }
 
 #[derive(Deserialize)]

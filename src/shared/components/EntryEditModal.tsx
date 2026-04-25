@@ -1,4 +1,5 @@
 import { useEffect, useState } from "preact/hooks";
+import { useBackHandler } from "../hooks/useBackHandler";
 import { deleteListEntry, getFavorites, toggleMediaFavorite, updateListEntry } from "../api/database";
 import type { ListEntry } from "../types/app";
 import { DropdownSelect } from "./DropdownSelect";
@@ -41,6 +42,8 @@ export function EntryEditModal({
   favoritePending = false,
   onToggleFavorite,
 }: EntryEditModalProps) {
+  // System back-gesture / hardware back closes the modal instead of the app.
+  useBackHandler(true, onClose);
   const isManga = entry.mediaType.toUpperCase() === "MANGA";
   const scoreCfg = scoreInputConfig(scoreFormat);
 

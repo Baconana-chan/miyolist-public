@@ -1,4 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
+import { useBackHandler } from "../../shared/hooks/useBackHandler";
 import { getStaffDetails, toggleFavorite } from "../../shared/api/database";
 import { getFavoriteIdCache, isFavoriteEntity, updateFavoriteEntityCache } from "../../shared/favorites";
 import type { StaffDetails } from "../../shared/types/app";
@@ -158,6 +159,7 @@ export interface StaffPanelProps {
 }
 
 export function StaffPanel({ staffId, onClose, onCharacterClick, embedded = false }: StaffPanelProps) {
+  useBackHandler(!embedded, onClose);
   const [details, setDetails] = useState<StaffDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

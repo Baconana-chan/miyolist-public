@@ -1,4 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
+import { useBackHandler } from "../../shared/hooks/useBackHandler";
 import { getMediaDetails, addToLibrary, getFavorites, getListEntryByMediaId, toggleMediaFavorite, updateListEntry } from "../../shared/api/database";
 import { getViewer } from "../../shared/api/auth";
 import type { MediaDetails, ListEntry } from "../../shared/types/app";
@@ -527,7 +528,7 @@ function DetailContent({ details, entry, onAdded, scoreFormat, customListNames, 
 
       {/* ── Relations ── */}
       {relationItems.length > 0 && (
-        <div class="mt-5 px-5">
+        <div class="mt-5 px-5 [content-visibility:auto] [contain-intrinsic-size:auto_180px]">
           <div class="mb-2 flex items-center justify-between">
             <p class="text-[0.72rem] font-semibold uppercase tracking-wider text-[#5a5650]">Related</p>
             {relationItems.length > 5 && (
@@ -567,7 +568,7 @@ function DetailContent({ details, entry, onAdded, scoreFormat, customListNames, 
 
       {/* ── Recommendations ── */}
       {recommendationItems.length > 0 && (
-        <div class="mt-5 px-5">
+        <div class="mt-5 px-5 [content-visibility:auto] [contain-intrinsic-size:auto_200px]">
           <div class="mb-2 flex items-center justify-between">
             <p class="text-[0.72rem] font-semibold uppercase tracking-wider text-[#5a5650]">More like this</p>
             {recommendationItems.length > 5 && (
@@ -612,7 +613,7 @@ function DetailContent({ details, entry, onAdded, scoreFormat, customListNames, 
 
       {/* ── Characters ── */}
       {characterItems.length > 0 && (
-        <div class="mt-5 px-5">
+        <div class="mt-5 px-5 [content-visibility:auto] [contain-intrinsic-size:auto_170px]">
           <div class="mb-2 flex items-center justify-between">
             <p class="text-[0.72rem] font-semibold uppercase tracking-wider text-[#5a5650]">Characters</p>
             {characterItems.length > 5 && (
@@ -652,7 +653,7 @@ function DetailContent({ details, entry, onAdded, scoreFormat, customListNames, 
 
       {/* ── Staff ── */}
       {staffItems.length > 0 && (
-        <div class="mt-5 px-5">
+        <div class="mt-5 px-5 [content-visibility:auto] [contain-intrinsic-size:auto_170px]">
           <div class="mb-2 flex items-center justify-between">
             <p class="text-[0.72rem] font-semibold uppercase tracking-wider text-[#5a5650]">Staff</p>
             {staffItems.length > 5 && (
@@ -781,6 +782,20 @@ export function MediaDetailsPanel({
   const [isFavorite, setIsFavorite] = useState(false);
   const [favoritePending, setFavoritePending] = useState(false);
   const [favoriteCount, setFavoriteCount] = useState<number | null>(null);
+
+  // Wire system back-gesture / hardware back to close this overlay (mobile)
+  // and request fullscreen so the Android status bar doesn't sit on top of
+  // the panel header.  Skipped when the panel is embedded inside the
+  // multi-pane side sheet on desktop, because there the side-sheet host
+  // already manages its own keyboard shortcuts and we don't want to push
+  // browser history entries that compete with native Preact-router behaviour.
+  useBackHandler(!embedded, onClose);
+
+  // The expanded "see all" cast/recommendations grid lives inside the same
+  // panel but covers the visible viewport, so it should also intercept the
+  // back gesture independently — pressing back collapses the grid first
+  // before falling through to closing the whole panel.
+  useBackHandler(castView != null, () => setCastView(null));
 
   const openMediaTarget = (id: number) => {
     if (onOpenMedia) {
@@ -938,6 +953,17 @@ export function MediaDetailsPanel({
   };
 
   useEffect(() => {
+    // Tear down any sub-overlays from the previous media so we never end up
+    // with a CharacterPanel / StaffPanel / StudioPanel pointing at a person
+    // from the panel the user just navigated away from.  Same for the
+    // expanded "see all" cast view.  Without this the previous panel's
+    // overlays linger as DOM, contributing to the "panels stacking up" feel
+    // on mobile when navigating through related/recommendations.
+    setOpenCharacterId(null);
+    setOpenStaffId(null);
+    setOpenStudioId(null);
+    setCastView(null);
+
     const cachedDetails = MEDIA_DETAILS_CACHE.get(currentId);
     const cachedEntry = MEDIA_ENTRY_CACHE.get(currentId);
 

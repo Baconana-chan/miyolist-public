@@ -215,23 +215,37 @@ function BarChart({
 function ScoreHistogram({ buckets, scoreFormat }: { buckets: { score: number; count: number }[]; scoreFormat: string }) {
   const max = Math.max(...buckets.map((b) => b.count), 1);
   return (
-    <div class="flex items-end gap-1.5 h-24">
-      {buckets.map((b) => {
-        const pct = (b.count / max) * 100;
-        return (
-          <div key={b.score} class="flex flex-col items-center gap-0.5 flex-1">
+    <div class="flex flex-col gap-1">
+      {/* Bars row — `h-24` provides the explicit height that each bar's
+          `height: %` is computed against.  Putting bars directly under this
+          container avoids the previous circular-height bug where the bar's
+          percentage height resolved against an auto-height flex column. */}
+      <div class="flex items-end gap-1.5 h-24">
+        {buckets.map((b) => {
+          const pct = (b.count / max) * 100;
+          return (
             <div
-              class="w-full rounded-t transition-all"
+              key={b.score}
+              class="flex-1 rounded-t transition-all"
               style={{
                 height: `${pct}%`,
                 minHeight: b.count > 0 ? "4px" : "0",
                 background: `rgba(217,116,82,${0.4 + (b.score / 10) * 0.6})`,
               }}
+              title={`${b.count} entr${b.count === 1 ? "y" : "ies"}`}
             />
-            <span class="text-[10px] text-[#7a746e]">{formatScore(b.score, scoreFormat)}</span>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      {/* Labels row — kept as separate flex row so it has no influence on
+          the bar height calculation above. */}
+      <div class="flex gap-1.5">
+        {buckets.map((b) => (
+          <span key={b.score} class="flex-1 text-center text-[10px] text-[#7a746e]">
+            {formatScore(b.score, scoreFormat)}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }

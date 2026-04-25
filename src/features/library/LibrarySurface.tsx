@@ -197,8 +197,13 @@ function EntryRow({ entry, mediaKind, scoreFormat, onEdit, onDetails, onProgress
         <p class={`truncate font-semibold text-[#f1efe7] ${compact ? "text-[0.84rem]" : "text-[0.92rem]"}`}>{entry.title}</p>
         <div class="mt-0.5 flex flex-wrap items-center gap-x-2 text-[0.77rem] text-[#7a766e]">
           {progressText && <span>{progressText} {progressUnit}</span>}
-          {entry.score != null && (
-            <span class="text-[#d4b86a]">{formatScore(entry.score, scoreFormat)}</span>
+          {entry.score != null && entry.score > 0 && (
+            <span class="inline-flex items-center gap-0.5 text-[#d4b86a]">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M12 2l2.9 6.9L22 10l-5.5 4.8L18 22l-6-3.5L6 22l1.5-7.2L2 10l7.1-1.1L12 2z" />
+              </svg>
+              {formatScore(entry.score, scoreFormat)}
+            </span>
           )}
           {entry.isDirty && <span class="text-[#d97452]">not synced</span>}
         </div>
@@ -265,7 +270,10 @@ function EntryGridCard({ entry, mediaKind, scoreFormat, onEdit, onDetails, onPro
           <img src={entry.coverImage} alt="" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />
         )}
         {entry.score != null && entry.score > 0 && (
-          <span class="absolute right-1.5 top-1.5 rounded-full bg-[rgba(30,30,30,0.82)] px-1.5 py-0.5 text-[0.62rem] font-bold text-[#d4b86a] backdrop-blur-sm">
+          <span class="absolute right-1.5 top-1.5 inline-flex items-center gap-0.5 rounded-full bg-[rgba(30,30,30,0.82)] px-1.5 py-0.5 text-[0.62rem] font-bold text-[#d4b86a] backdrop-blur-sm">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2l2.9 6.9L22 10l-5.5 4.8L18 22l-6-3.5L6 22l1.5-7.2L2 10l7.1-1.1L12 2z" />
+            </svg>
             {formatScore(entry.score, scoreFormat)}
           </span>
         )}

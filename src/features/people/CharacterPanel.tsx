@@ -1,4 +1,5 @@
 import { useState, useEffect } from "preact/hooks";
+import { useBackHandler } from "../../shared/hooks/useBackHandler";
 import { getCharacterDetails, toggleFavorite } from "../../shared/api/database";
 import { getFavoriteIdCache, isFavoriteEntity, updateFavoriteEntityCache } from "../../shared/favorites";
 import type { CharacterDetails } from "../../shared/types/app";
@@ -160,6 +161,7 @@ export interface CharacterPanelProps {
 }
 
 export function CharacterPanel({ characterId, onClose, onMediaClick, embedded = false }: CharacterPanelProps) {
+  useBackHandler(!embedded, onClose);
   const [details, setDetails] = useState<CharacterDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -418,6 +418,18 @@ function AppShellContent() {
       .finally(() => setBooting(false));
   }, []);
 
+  // Disable the native right-click context menu on desktop — the app is a
+  // packaged Tauri client, not a webpage, so the browser's "Inspect / Reload"
+  // menu only confuses end users.  The handler is a no-op on touch devices
+  // (mobile WebViews don't fire `contextmenu`) so we don't need to gate it.
+  useEffect(() => {
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("contextmenu", onContextMenu);
+    return () => window.removeEventListener("contextmenu", onContextMenu);
+  }, []);
+
   useEffect(() => {
     const becameOnline = !wasOnlineRef.current && online;
     wasOnlineRef.current = online;
@@ -530,7 +542,7 @@ function AppShellContent() {
           </div>
         </header>
 
-        <main class="min-h-0 flex-1 overflow-y-auto pb-[calc(4.8rem+env(safe-area-inset-bottom))]">
+        <main class="min-h-0 flex-1 overflow-y-auto">
           {renderActiveSurface()}
         </main>
 
@@ -560,22 +572,6 @@ function AppShellContent() {
                 </li>
               );
             })}
-            <li>
-              <button
-                class={`flex min-w-[4.65rem] flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 text-[0.66rem] font-semibold tracking-[0.01em] transition ${
-                  screen === "auth"
-                    ? "bg-[rgba(217,116,82,0.2)] text-[#f1efe7]"
-                    : "text-[#8b877f] hover:bg-white/6 hover:text-[#ded9d0]"
-                }`}
-                onClick={() => setScreen("auth")}
-                title="Account"
-              >
-                <span class={`${screen === "auth" ? "text-[#f29a7c]" : "text-[#6f8ca5]"}`}>
-                  <IconGear />
-                </span>
-                <span>Account</span>
-              </button>
-            </li>
           </ul>
         </nav>
 

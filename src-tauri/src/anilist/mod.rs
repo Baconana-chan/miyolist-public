@@ -205,9 +205,15 @@ fn graphql_post<T: serde::de::DeserializeOwned>(
             ));
         }
 
-        let parsed: GraphQlResponse<T> = response
-            .json()
-            .map_err(|e| format!("[PARSE_ERROR] Failed to decode AniList response: {e}"))?;
+        // Read body as text first so a parse failure can include a snippet of
+        // the actual response — invaluable when AniList changes a field shape.
+        let body_text = response
+            .text()
+            .map_err(|e| format!("[NETWORK_ERROR] Failed to read AniList response body: {e}"))?;
+        let parsed: GraphQlResponse<T> = serde_json::from_str(&body_text).map_err(|e| {
+            let snippet: String = body_text.chars().take(500).collect();
+            format!("[PARSE_ERROR] Failed to decode AniList response: {e} | body: {snippet}")
+        })?;
 
         if let Some(errors) = parsed.errors {
             let msg = errors
@@ -1805,11 +1811,14 @@ fn persist_oauth_session(
 
 // ─── User list sync ───────────────────────────────────────────────────────────
 
-/// Perform a **full** pull of the user's list from AniList (all pages via
-/// `MediaListCollection`).  Returns `(synced, conflicts, max_updated_at)`.
+/// Perform a **full** pull of the user's list from AniList in a single
+/// `MediaListCollection` query.  Returns `(synced, conflicts, max_updated_at)`.
 ///
-/// `max_updated_at` is the highest `updatedAt` Unix timestamp seen in the
-/// response; the caller should store it as the new high-water mark.
+/// **Currently unused** — `sync_lists_smart` always uses the paginated
+/// `fetch_user_lists_delta` path because `MediaListCollection` is unreliable
+/// for users with large libraries (>~1k entries it routinely 5xxs or hits
+/// AniList's complexity budget).  Kept for reference / potential fallback.
+#[allow(dead_code)]
 pub fn fetch_user_lists(app: &AppHandle, media_type: &str) -> Result<(i64, i64, i64), String> {
     let config = load_config()?;
     let access_token = read_access_token(app)?;
@@ -2024,9 +2033,17 @@ pub fn fetch_user_lists(app: &AppHandle, media_type: &str) -> Result<(i64, i64, 
     Ok((synced, conflicts, max_hwm))
 }
 
-/// Perform an **incremental** pull using `Page.mediaList(updatedAt_greater: $since)`.
-/// Only entries that changed on AniList after `since_ts` (Unix seconds) are fetched.
-/// Automatically pages through all results.  Returns `(synced, conflicts, max_updated_at)`.
+/// Pull the user's list from AniList using the paginated `Page.mediaList`
+/// endpoint sorted by `UPDATED_TIME_DESC`.  When `since_ts > 0` this acts as
+/// an incremental delta sync — pagination stops as soon as the first entry
+/// older than `since_ts` is seen, because the rest of the list cannot have
+/// updates newer than the high-water mark.  When `since_ts == 0` it pages
+/// through the entire list (full sync path used on fresh login / reinstall).
+///
+/// AniList's GraphQL schema does **not** expose an `updatedAt_greater`
+/// argument on `Page.mediaList`, so the filter is applied client-side.
+///
+/// Returns `(synced, conflicts, max_updated_at)`.
 pub fn fetch_user_lists_delta(
     app: &AppHandle,
     media_type: &str,
@@ -2041,11 +2058,14 @@ pub fn fetch_user_lists_delta(
     // timestamp as the filter).
     let since = (since_ts - 1).max(0);
 
+    // NOTE: `customLists(asArray: true)` is required — without the flag
+    // AniList returns a `{name: bool}` JSON object that fails to decode into
+    // `Vec<String>` (manifests as `[PARSE_ERROR] error decoding response body`).
     const GQL: &str = "
-        query DeltaSync($userId: Int, $type: MediaType, $since: Int, $page: Int) {
+        query DeltaSync($userId: Int, $type: MediaType, $page: Int) {
             Page(page: $page, perPage: 50) {
                 pageInfo { hasNextPage }
-                mediaList(userId: $userId, type: $type, updatedAt_greater: $since) {
+                mediaList(userId: $userId, type: $type, sort: UPDATED_TIME_DESC) {
                     id
                     status
                     score(format: POINT_10_DECIMAL)
@@ -2053,7 +2073,7 @@ pub fn fetch_user_lists_delta(
                     progressVolumes
                     repeat
                     notes
-                    customLists
+                    customLists(asArray: true)
                     startedAt { year month day }
                     completedAt { year month day }
                     updatedAt
@@ -2067,6 +2087,9 @@ pub fn fetch_user_lists_delta(
                         episodes
                         chapters
                         volumes
+                        genres
+                        duration
+                        studios(isMain: true) { nodes { name } }
                     }
                 }
             }
@@ -2081,7 +2104,10 @@ pub fn fetch_user_lists_delta(
     let mut conflicts = 0i64;
     let mut max_hwm = since_ts;
 
-    for page in 1i32..=20 {
+    // Stop early once we drop below `since` because the list is sorted
+    // UPDATED_TIME_DESC — any subsequent page can only contain older entries.
+    let mut reached_hwm = false;
+    for page in 1i32..=200 {
         let payload: DeltaListPayload = graphql_post(
             &config.graphql_url,
             &access_token,
@@ -2090,7 +2116,6 @@ pub fn fetch_user_lists_delta(
                 "variables": {
                     "userId": viewer_id,
                     "type": media_type,
-                    "since": since,
                     "page": page
                 }
             }),
@@ -2106,6 +2131,14 @@ pub fn fetch_user_lists_delta(
         connection.execute("BEGIN", []).map_err(|e| e.to_string())?;
 
         for entry in &entries {
+            // Client-side delta filter: skip entries we already have at the
+            // current high-water mark or older.  `since == 0` means full sync
+            // and includes everything.
+            if since > 0 && entry.updated_at <= since {
+                reached_hwm = true;
+                continue;
+            }
+
             let media = &entry.media;
 
             if entry.updated_at > max_hwm {
@@ -2176,6 +2209,16 @@ pub fn fetch_user_lists_delta(
             let is_adult = media.is_adult.unwrap_or(false) as i64;
             let started_iso = entry.started_at.as_ref().and_then(|d| d.to_iso_date());
             let completed_iso = entry.completed_at.as_ref().and_then(|d| d.to_iso_date());
+            let studios_payload: Vec<serde_json::Value> = media
+                .studios
+                .as_ref()
+                .map(|s| {
+                    s.nodes
+                        .iter()
+                        .map(|n| json!({ "name": n.name }))
+                        .collect()
+                })
+                .unwrap_or_default();
             let cache_payload = json!({
                 "id": media.id,
                 "type": media.media_type,
@@ -2186,6 +2229,9 @@ pub fn fetch_user_lists_delta(
                 "episodes": media.episodes,
                 "chapters": media.chapters,
                 "volumes": media.volumes,
+                "genres": media.genres,
+                "duration": media.duration,
+                "studios": studios_payload,
             }).to_string();
 
             connection.execute(
@@ -2207,7 +2253,7 @@ pub fn fetch_user_lists_delta(
             let score = entry.score.filter(|&s| s > 0.0);
             let progress_vols = entry.progress_volumes.unwrap_or(0);
             let custom_lists_json =
-                serde_json::to_string(&entry.custom_lists.clone().unwrap_or_default())
+                serde_json::to_string(&entry.enabled_custom_list_names())
                     .unwrap_or_else(|_| "[]".to_string());
 
             connection.execute(
@@ -2248,7 +2294,9 @@ pub fn fetch_user_lists_delta(
             .execute("COMMIT", [])
             .map_err(|e| e.to_string())?;
 
-        if !has_next {
+        // Delta short-circuit: as soon as one entry on this page was older
+        // than the HWM, every following page can only be older still.
+        if reached_hwm || !has_next {
             break;
         }
     }
@@ -2256,9 +2304,17 @@ pub fn fetch_user_lists_delta(
     Ok((synced, conflicts, max_hwm))
 }
 
-/// Smart sync: push dirty entries first, then choose full vs. delta pull based
-/// on whether a valid high-water mark exists.  Updates the HWM and
-/// `last_synced_at` in `app_settings` on success.
+/// Smart sync: push dirty entries first, then pull from AniList using the
+/// paginated `Page.mediaList` path.  When no high-water mark exists (fresh
+/// login, reinstall, or empty library) the pull starts from `since = 0`,
+/// which still uses pagination — avoiding the single-request
+/// `MediaListCollection` query that fails for users with large libraries
+/// (complexity / timeout limits on the AniList side).
+///
+/// Errors from both pulls are surfaced to the caller instead of being
+/// silently swallowed: if nothing was pushed *and* both pulls failed, the
+/// underlying error is returned so the frontend can display a real message
+/// instead of a misleading "Up to date".
 pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
     // 1. Push all locally-dirty entries before pulling so the pull does not
     //    overwrite edits we have not uploaded yet.
@@ -2271,31 +2327,56 @@ pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
         last_synced_at: String::new(),
     });
 
-    // 2. Choose delta vs. full sync.
-    // Force a full sync when the local library is empty even if a HWM exists
-    // (covers reinstalls / DB resets where the settings table survived but
-    // media_list_entries was cleared — delta would find nothing and wrongly
-    // report "Up to date").
+    // 2. Decide on `since` and whether this counts as a delta sync.
+    // Force a full sync (since = 0) when the local library is empty even if a
+    // HWM exists (covers reinstalls / DB resets where the settings table
+    // survived but media_list_entries was cleared).
     let hwm = crate::db::get_sync_high_water(app).unwrap_or(None);
     let library_empty = crate::db::get_library_snapshot(app)
         .map(|s| s.total_entries == 0)
         .unwrap_or(true);
-    let (synced, conflicts, is_delta, new_hwm) = if let Some(ts) = hwm.filter(|_| !library_empty) {
-        let (a, ac, ah) = fetch_user_lists_delta(app, "ANIME", ts).unwrap_or((0, 0, ts));
-        let (m, mc, mh) = fetch_user_lists_delta(app, "MANGA", ts).unwrap_or((0, 0, ts));
-        (a + m, ac + mc, true, ah.max(mh))
-    } else {
-        let (a, ac, ah) = fetch_user_lists(app, "ANIME").unwrap_or((0, 0, 0));
-        let (m, mc, mh) = fetch_user_lists(app, "MANGA").unwrap_or((0, 0, 0));
-        (a + m, ac + mc, false, ah.max(mh))
-    };
+    let effective_hwm = hwm.filter(|_| !library_empty);
+    let since = effective_hwm.unwrap_or(0);
+    let is_delta = effective_hwm.is_some();
 
-    // 3. Persist new high-water mark (only advance it, never go backwards).
+    // 3. Pull both media types using the paginated path. Track the first
+    //    error so it can be surfaced if nothing else succeeded.
+    let mut pull_error: Option<String> = None;
+    let (a, ac, ah) = match fetch_user_lists_delta(app, "ANIME", since) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[SYNC] anime pull failed: {e}");
+            pull_error.get_or_insert(e);
+            (0, 0, since)
+        }
+    };
+    let (m, mc, mh) = match fetch_user_lists_delta(app, "MANGA", since) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[SYNC] manga pull failed: {e}");
+            pull_error.get_or_insert(e);
+            (0, 0, since)
+        }
+    };
+    let synced = a + m;
+    let conflicts = ac + mc;
+    let new_hwm = ah.max(mh);
+
+    // 4. If the pull contributed nothing AND an error was captured, propagate
+    //    it so the user sees the real reason (timeout / GraphQL / auth).
+    //    A successful push alone is still considered a successful sync.
+    if synced == 0 && push.pushed == 0 && push.failed == 0 {
+        if let Some(err) = pull_error {
+            return Err(err);
+        }
+    }
+
+    // 5. Persist new high-water mark (only advance it, never go backwards).
     if new_hwm > hwm.unwrap_or(0) {
         let _ = crate::db::set_sync_high_water(app, new_hwm);
     }
 
-    // 4. Record last-synced timestamp.
+    // 6. Record last-synced timestamp.
     let last_synced_at = crate::db::set_last_synced_at(app).unwrap_or_default();
 
     Ok(SyncSummary {
