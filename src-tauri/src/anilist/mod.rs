@@ -2212,12 +2212,7 @@ pub fn fetch_user_lists_delta(
             let studios_payload: Vec<serde_json::Value> = media
                 .studios
                 .as_ref()
-                .map(|s| {
-                    s.nodes
-                        .iter()
-                        .map(|n| json!({ "name": n.name }))
-                        .collect()
-                })
+                .map(|s| s.nodes.iter().map(|n| json!({ "name": n.name })).collect())
                 .unwrap_or_default();
             let cache_payload = json!({
                 "id": media.id,
@@ -2252,9 +2247,8 @@ pub fn fetch_user_lists_delta(
             let status = entry.status.to_lowercase();
             let score = entry.score.filter(|&s| s > 0.0);
             let progress_vols = entry.progress_volumes.unwrap_or(0);
-            let custom_lists_json =
-                serde_json::to_string(&entry.enabled_custom_list_names())
-                    .unwrap_or_else(|_| "[]".to_string());
+            let custom_lists_json = serde_json::to_string(&entry.enabled_custom_list_names())
+                .unwrap_or_else(|_| "[]".to_string());
 
             connection.execute(
                 "INSERT INTO media_list_entries (
