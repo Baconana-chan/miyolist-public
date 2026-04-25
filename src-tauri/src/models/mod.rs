@@ -184,7 +184,7 @@ pub struct SyncSummary {
 /// like the app had frozen).  The struct is updated in-place in a global
 /// mutex by `fetch_user_lists_delta`; the frontend polls
 /// `get_sync_progress` every second while a sync is in flight.
-#[derive(Clone, Serialize)]
+#[derive(Clone, Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncProgress {
     /// `true` while a sync is actively running.
@@ -200,19 +200,6 @@ pub struct SyncProgress {
     /// Optional human-friendly status line, e.g.
     /// `"Pulling anime · page 3 (150 entries)"`.
     pub message: String,
-}
-
-impl Default for SyncProgress {
-    fn default() -> Self {
-        Self {
-            active: false,
-            phase: String::new(),
-            page: 0,
-            entries: 0,
-            total_entries: 0,
-            message: String::new(),
-        }
-    }
 }
 
 /// One entry from the `pending_conflicts` table — both sides of a conflict.

@@ -133,7 +133,7 @@ pub fn get_sync_progress() -> SyncProgress {
 
 fn update_sync_progress<F: FnOnce(&mut SyncProgress)>(mutate: F) {
     if let Ok(mut g) = sync_progress_cell().lock() {
-        mutate(&mut *g);
+        mutate(&mut g);
     }
 }
 
