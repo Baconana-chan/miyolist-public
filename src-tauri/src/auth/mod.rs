@@ -18,7 +18,12 @@ const CALLBACK_BIND_HOST: &str = "127.0.0.1";
 const CALLBACK_PORT: u16 = 43821;
 const CALLBACK_PATH: &str = "/auth/callback";
 const RESPONSE_TYPE: &str = "code";
-const AUTH_TIMEOUT_SECS: u64 = 120;
+// 10 minutes.  AniList may require the user to sign in (or accept a 2FA prompt
+// or re-authorize the app) before redirecting to our local callback.  The
+// previous 2-minute window was too tight for cold-start logins on mobile and
+// caused the app to give up while the browser was still on the AniList login
+// page, forcing the user to relaunch the auth flow.
+const AUTH_TIMEOUT_SECS: u64 = 600;
 
 static CALLBACK_LISTENER_STATE: OnceLock<Mutex<CallbackListenerState>> = OnceLock::new();
 
@@ -83,6 +88,23 @@ pub fn primary_platform() -> String {
 pub fn prepare_auth_request(app: &AppHandle) -> Result<AuthRequestPlan, String> {
     crate::db::initialize_database(app)?;
     ensure_callback_listener(app)?;
+
+    // Reset the timeout window on every fresh sign-in attempt.  The listener
+    // is process-global and may already have been "Running" from a prior
+    // attempt, in which case `ensure_callback_listener` was a no-op.  Without
+    // this reset the user only has the original window left from the very
+    // first click, which can already be expired before they finish typing
+    // their AniList credentials.
+    {
+        let mut guard = callback_listener_state()
+            .lock()
+            .map_err(|_| "Callback listener state is poisoned".to_string())?;
+        if matches!(*guard, CallbackListenerState::Running { .. }) {
+            *guard = CallbackListenerState::Running {
+                started_at: Instant::now(),
+            };
+        }
+    }
 
     let redirect_uri_value = redirect_uri();
     let state = Uuid::new_v4().simple().to_string();

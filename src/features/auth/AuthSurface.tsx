@@ -499,12 +499,15 @@ function LoginView({ onAuthenticated }: { onAuthenticated: (s: AuthSessionStatus
         }
       }, 2000);
 
-      // 3-minute hard timeout
+      // 10-minute hard timeout — must match the Rust-side AUTH_TIMEOUT_SECS
+      // (`auth/mod.rs`).  AniList sometimes requires the user to log in or
+      // accept a 2FA prompt before the redirect fires, and the previous
+      // 3-minute window aborted the flow while the user was still typing.
       timeoutRef.current = setTimeout(() => {
         stopPolling();
         setPhase("error");
         setError("Sign-in timed out. Please try again.");
-      }, 180_000);
+      }, 600_000);
     } catch (e) {
       setPhase("error");
       setError(e instanceof Error ? e.message : String(e));

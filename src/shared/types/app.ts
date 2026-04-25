@@ -158,6 +158,20 @@ export interface SyncSummary {
   lastSyncedAt: string;
 }
 
+/**
+ * Live snapshot of an in-flight sync so the UI can render real progress
+ * ("Syncing 250/2500") instead of an opaque spinner on long pulls.
+ * Polled from the frontend every ~1s while a sync command is awaiting.
+ */
+export interface SyncProgress {
+  active: boolean;
+  phase: string;
+  page: number;
+  entries: number;
+  totalEntries: number;
+  message: string;
+}
+
 export interface SyncLogEntry {
   id: number;
   mediaId: number;

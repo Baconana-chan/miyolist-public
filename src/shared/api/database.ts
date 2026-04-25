@@ -27,6 +27,7 @@ import type {
   StudioDetails,
   StudioSearchResult,
   SyncLogEntry,
+  SyncProgress,
   SyncSummary,
   FollowingActivityItem,
   SocialUser,
@@ -34,8 +35,9 @@ import type {
   UserFavorites,
   UserProfile,
   UserSearchResult,
+  PendingConflict,
 } from "../types/app";
-import type { PendingConflict } from "../types/app";
+
 import {
   getOnlineStatus,
   initializeOnlineStatus,
@@ -125,6 +127,10 @@ export function getListEntryByMediaId(mediaId: number) {
 
 export function syncUserLists() {
   return invokeRemote<SyncSummary>("sync_user_lists");
+}
+
+export function getSyncProgress() {
+  return invoke<SyncProgress>("get_sync_progress");
 }
 
 export function pushDirtyEntries() {

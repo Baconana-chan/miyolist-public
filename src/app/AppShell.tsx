@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 
 import type { JSX } from "preact/jsx-runtime";
 import { getAuthSessionStatus } from "../shared/api/auth";
-import { checkNotifications, getAppSettings, prefetchCovers, pushDirtyEntries, refreshAiringSchedule, syncUserLists } from "../shared/api/database";
+import { checkNotifications, getAppSettings, getSyncProgress, prefetchCovers, pushDirtyEntries, refreshAiringSchedule, syncUserLists } from "../shared/api/database";
 import { useOnlineStatus } from "../shared/hooks/useOnlineStatus";
 import type { AuthSessionStatus, ScreenId } from "../shared/types/app";
 import { AuthSurface } from "../features/auth/AuthSurface";
@@ -369,6 +369,7 @@ function AppShellContent() {
   const [booting, setBooting]   = useState(true);
   const [surfaceRefreshKey, setSurfaceRefreshKey] = useState(0);
   const [manualSyncing, setManualSyncing] = useState(false);
+  const [syncProgressText, setSyncProgressText] = useState<string>("");
   const online = useOnlineStatus();
   const mobileShell = useMobileShell();
   const wasOnlineRef = useRef<boolean>(online);
@@ -489,6 +490,24 @@ function AppShellContent() {
   async function handleManualSync() {
     if (manualSyncing) return;
     setManualSyncing(true);
+    setSyncProgressText("");
+
+    // Poll the Rust-side progress mutex every second so the mobile sync
+    // button can render real feedback ("Pulling anime · 250") on long
+    // syncs.  Without this the button just sits at "Syncing..." for ~2
+    // minutes on a 2.5k-entry library and looks like the app froze.
+    const pollId = setInterval(async () => {
+      try {
+        const p = await getSyncProgress();
+        if (p.active) {
+          const count = p.entries > 0 ? ` · ${p.entries}` : "";
+          setSyncProgressText(`${p.phase || "syncing"}${count}`);
+        }
+      } catch {
+        // ignore transient poll errors
+      }
+    }, 1000);
+
     try {
       await syncUserLists();
       invalidateLibraryCache();
@@ -496,7 +515,9 @@ function AppShellContent() {
     } catch {
       // Keep manual sync quiet in shell; feature surfaces show detailed states.
     } finally {
+      clearInterval(pollId);
       setManualSyncing(false);
+      setSyncProgressText("");
     }
   }
 
@@ -522,7 +543,11 @@ function AppShellContent() {
               onClick={handleManualSync}
               disabled={manualSyncing}
             >
-              {manualSyncing ? "Syncing..." : "Sync"}
+              {manualSyncing
+                ? syncProgressText
+                  ? `↻ ${syncProgressText}`
+                  : "Syncing…"
+                : "Sync"}
             </button>
             <button
               class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/12 bg-white/5"

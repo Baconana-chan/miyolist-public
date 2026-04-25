@@ -18,7 +18,8 @@ use crate::models::{
     AuthSessionStatus, CharacterDetails, CharacterMedia, FavoriteMedia, FavoritePerson,
     FavoriteStudio, FollowingActivityItem, FoundationModule, GlobalAiringEntry, PersonSearchResult,
     SocialUser, StaffCharacter, StaffDetails, StudioDetails, StudioMedia, StudioSearchResult,
-    SyncSummary, UserFavorites, UserMediaListItem, UserProfile, UserProfileStats, UserSearchResult,
+    SyncProgress, SyncSummary, UserFavorites, UserMediaListItem, UserProfile, UserProfileStats,
+    UserSearchResult,
 };
 
 const DEFAULT_AUTH_URL: &str = "https://anilist.co/api/v2/oauth/authorize";
@@ -40,11 +41,17 @@ const BUILD_AUTH_URL: Option<&str> = option_env!("ANILIST_AUTH_URL");
 const BUILD_TOKEN_URL: Option<&str> = option_env!("ANILIST_TOKEN_URL");
 const BUILD_GRAPHQL_URL: Option<&str> = option_env!("ANILIST_GRAPHQL_URL");
 
-/// AniList allows 90 requests per minute; use 85 to leave a safety margin.
-const RATE_LIMIT_MAX: usize = 85;
+/// AniList currently throttles clients to 30 requests per minute (down from
+/// the historical 90).  We cap our local sliding window a few requests below
+/// that to leave headroom for in-flight requests that haven't yet been counted
+/// by the server, plus any concurrent calls from background sync.
+const RATE_LIMIT_MAX: usize = 28;
 const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(60);
 /// Max retries on 429 / 5xx responses (in addition to the first attempt).
 const MAX_RETRIES: u32 = 3;
+/// Hard ceiling on how long a single 429 back-off may sleep, so a hostile or
+/// buggy `Retry-After` value can't wedge a request for hours.
+const MAX_RETRY_AFTER_SECS: u64 = 120;
 
 // ─── OS keyring ───────────────────────────────────────────────────────────────
 
@@ -104,6 +111,61 @@ pub fn is_online() -> bool {
                 || response.status().as_u16() == 405
         }
         Err(_) => false,
+    }
+}
+
+// ─── Sync progress (UI feedback for long syncs) ──────────────────────────────
+
+static SYNC_PROGRESS: OnceLock<Mutex<SyncProgress>> = OnceLock::new();
+
+fn sync_progress_cell() -> &'static Mutex<SyncProgress> {
+    SYNC_PROGRESS.get_or_init(|| Mutex::new(SyncProgress::default()))
+}
+
+/// Snapshot the current sync progress for the frontend.  Cheap; safe to poll
+/// from a setInterval while a sync command is awaiting.
+pub fn get_sync_progress() -> SyncProgress {
+    sync_progress_cell()
+        .lock()
+        .map(|g| g.clone())
+        .unwrap_or_default()
+}
+
+fn update_sync_progress<F: FnOnce(&mut SyncProgress)>(mutate: F) {
+    if let Ok(mut g) = sync_progress_cell().lock() {
+        mutate(&mut *g);
+    }
+}
+
+fn begin_sync_progress(initial_phase: &str) {
+    update_sync_progress(|p| {
+        *p = SyncProgress {
+            active: true,
+            phase: initial_phase.to_string(),
+            page: 0,
+            entries: 0,
+            total_entries: 0,
+            message: format!("Starting sync · {initial_phase}"),
+        };
+    });
+}
+
+fn end_sync_progress() {
+    update_sync_progress(|p| {
+        p.active = false;
+        p.message = String::new();
+    });
+}
+
+/// RAII guard that flips `SyncProgress.active = false` when dropped, so the
+/// frontend's poll always sees an inactive state once `sync_lists_smart`
+/// returns — including on the early-return path that propagates a pull
+/// error.
+struct SyncProgressGuard;
+
+impl Drop for SyncProgressGuard {
+    fn drop(&mut self) {
+        end_sync_progress();
     }
 }
 
@@ -179,12 +241,36 @@ fn graphql_post<T: serde::de::DeserializeOwned>(
         let status = response.status();
 
         if status.as_u16() == 429 {
+            // Honour AniList's `Retry-After` header (seconds) when present,
+            // falling back to a 60s sleep — the documented window for the
+            // 30 req/min bucket.  Cap to MAX_RETRY_AFTER_SECS so a malformed
+            // header can't stall the app indefinitely.
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.trim().parse::<u64>().ok())
+                .map(|s| s.clamp(1, MAX_RETRY_AFTER_SECS))
+                .unwrap_or(60);
             last_err = format!(
                 "[RATE_LIMITED] AniList rate limit reached (attempt {})",
                 attempt + 1
             );
-            eprintln!("{last_err} — waiting 60s");
-            std::thread::sleep(Duration::from_secs(60));
+            eprintln!("{last_err} — waiting {retry_after}s");
+            // Penalise our local sliding window so subsequent calls in this
+            // process also back off, not just the retry of *this* request.
+            // We mark the queue as "full of recent timestamps" by pushing
+            // RATE_LIMIT_MAX entries dated `now`, which forces the next
+            // `rate_limit_acquire` to wait the full window.
+            {
+                let mut q = rate_limiter().lock().unwrap_or_else(|p| p.into_inner());
+                q.clear();
+                let stamp = Instant::now();
+                for _ in 0..RATE_LIMIT_MAX {
+                    q.push_back(stamp);
+                }
+            }
+            std::thread::sleep(Duration::from_secs(retry_after));
             continue;
         }
 
@@ -2288,6 +2374,19 @@ pub fn fetch_user_lists_delta(
             .execute("COMMIT", [])
             .map_err(|e| e.to_string())?;
 
+        // Update live progress so the UI can show "Pulling anime · page N
+        // (X entries)" instead of a frozen "Syncing..." button on long syncs.
+        update_sync_progress(|p| {
+            p.phase = media_type.to_lowercase();
+            p.page = page;
+            p.entries = synced;
+            p.total_entries += entries.len() as i64;
+            p.message = format!(
+                "Pulling {} · page {page} ({synced} entries)",
+                media_type.to_lowercase()
+            );
+        });
+
         // Delta short-circuit: as soon as one entry on this page was older
         // than the HWM, every following page can only be older still.
         if reached_hwm || !has_next {
@@ -2310,6 +2409,13 @@ pub fn fetch_user_lists_delta(
 /// underlying error is returned so the frontend can display a real message
 /// instead of a misleading "Up to date".
 pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
+    // Publish a live progress snapshot so the UI can show real feedback
+    // ("Pulling anime · page N · X entries") on long syncs instead of a
+    // frozen "Syncing..." button — particularly important on mobile, where
+    // a 2.5k-entry library takes ~2 minutes under the 30 req/min rate limit.
+    begin_sync_progress("pushing");
+    let _progress_guard = SyncProgressGuard;
+
     // 1. Push all locally-dirty entries before pulling so the pull does not
     //    overwrite edits we have not uploaded yet.
     let push = push_dirty_entries(app).unwrap_or(SyncSummary {
@@ -2335,6 +2441,12 @@ pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
 
     // 3. Pull both media types using the paginated path. Track the first
     //    error so it can be surfaced if nothing else succeeded.
+    update_sync_progress(|p| {
+        p.phase = "anime".into();
+        p.page = 0;
+        p.entries = 0;
+        p.message = "Pulling anime…".into();
+    });
     let mut pull_error: Option<String> = None;
     let (a, ac, ah) = match fetch_user_lists_delta(app, "ANIME", since) {
         Ok(v) => v,
@@ -2344,6 +2456,12 @@ pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
             (0, 0, since)
         }
     };
+    update_sync_progress(|p| {
+        p.phase = "manga".into();
+        p.page = 0;
+        p.entries = 0;
+        p.message = "Pulling manga…".into();
+    });
     let (m, mc, mh) = match fetch_user_lists_delta(app, "MANGA", since) {
         Ok(v) => v,
         Err(e) => {

@@ -123,6 +123,11 @@ pub fn sync_user_lists(app: AppHandle) -> Result<SyncSummary, String> {
 }
 
 #[tauri::command]
+pub fn get_sync_progress() -> crate::models::SyncProgress {
+    crate::anilist::get_sync_progress()
+}
+
+#[tauri::command]
 pub fn get_sync_log(app: AppHandle, limit: Option<i64>) -> Result<Vec<SyncLogEntry>, String> {
     crate::db::get_sync_log(&app, limit.unwrap_or(100))
 }

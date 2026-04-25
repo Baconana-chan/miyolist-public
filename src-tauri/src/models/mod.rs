@@ -177,6 +177,44 @@ pub struct SyncSummary {
     pub last_synced_at: String,
 }
 
+/// Live progress published while a sync is running so the UI can surface a
+/// real "X / Y items" indicator on slow paginated pulls (e.g. a 2.5k-entry
+/// library on a phone takes ~2 min on the 30 req/min rate limit, during
+/// which the previous "Syncing..." button gave no feedback and looked
+/// like the app had frozen).  The struct is updated in-place in a global
+/// mutex by `fetch_user_lists_delta`; the frontend polls
+/// `get_sync_progress` every second while a sync is in flight.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgress {
+    /// `true` while a sync is actively running.
+    pub active: bool,
+    /// Free-form short label, e.g. `"anime"`, `"manga"`, `"pushing"`.
+    pub phase: String,
+    /// Most recently completed page number (1-based), or 0 before any page.
+    pub page: i32,
+    /// Total entries pulled so far across all pages of the current phase.
+    pub entries: i64,
+    /// Cumulative entries pulled across all phases of this sync.
+    pub total_entries: i64,
+    /// Optional human-friendly status line, e.g.
+    /// `"Pulling anime · page 3 (150 entries)"`.
+    pub message: String,
+}
+
+impl Default for SyncProgress {
+    fn default() -> Self {
+        Self {
+            active: false,
+            phase: String::new(),
+            page: 0,
+            entries: 0,
+            total_entries: 0,
+            message: String::new(),
+        }
+    }
+}
+
 /// One entry from the `pending_conflicts` table — both sides of a conflict.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

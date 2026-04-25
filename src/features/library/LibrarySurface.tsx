@@ -492,8 +492,17 @@ export function LibrarySurface({ onNavigate, onEntryEdited }: LibrarySurfaceProp
   // Reset to first page whenever the filtered result set changes.
   useEffect(() => { setPage(0); }, [searchQuery, sortKey, sortDir, filterScore, filterScoreMin, filterScoreMax, filterProgress, filterUnsynced, filterHasNotes, mediaKind, activeStatus]);
 
-  // Scroll the list back to top on page change.
-  useEffect(() => { contentRef.current?.scrollTo({ top: 0, behavior: "instant" }); }, [page]);
+  // Scroll the list back to top on page change.  On desktop the inner
+  // `contentRef` is the scroll container; on mobile (≤900px) the inner
+  // overflow is released and the AppShell's `<main>` scrolls instead, so
+  // we walk up to the nearest scrollable ancestor as a fallback.
+  useEffect(() => {
+    const el = contentRef.current;
+    if (!el) return;
+    el.scrollTo({ top: 0, behavior: "instant" });
+    const outer = el.closest("main");
+    outer?.scrollTo({ top: 0, behavior: "instant" });
+  }, [page]);
 
   const pageCount       = Math.ceil(filteredEntries.length / PAGE_SIZE);
   const paginatedEntries = useMemo(
@@ -607,9 +616,15 @@ export function LibrarySurface({ onNavigate, onEntryEdited }: LibrarySurfaceProp
   );
 
   return (
-    <div class="flex h-full flex-col">
+    // On mobile (≤900px) we collapse this from a fixed-height flex column
+    // into a normal flow so the AppShell's `<main>` scroll handles the whole
+    // surface — that lets the header / kind tabs / toolbar scroll away with
+    // the content instead of permanently eating ~50% of a phone viewport.
+    // Desktop keeps the original split: fixed header above, scrollable list
+    // below.
+    <div class="flex h-full flex-col max-[900px]:h-auto max-[900px]:min-h-full">
       {/* ── Header ────────────────────────────────────────────────────── */}
-      <header class="shrink-0 px-8 pt-8 pb-0">
+      <header class="shrink-0 px-8 pt-8 pb-0 max-[900px]:px-4 max-[900px]:pt-4">
         <div class="flex items-center justify-between">
           <h1 class="text-[2rem] font-bold leading-[1.05] tracking-[-0.03em] text-[#f1efe7]">
             Library
@@ -906,7 +921,14 @@ export function LibrarySurface({ onNavigate, onEntryEdited }: LibrarySurfaceProp
         </div>
       )}
       {/* ── Content ───────────────────────────────────────────────────── */}
-      <div ref={contentRef} class={`flex-1 overflow-y-auto overflow-x-hidden py-4 ${viewStyle === "grid" ? "px-6" : "px-8"}`}>
+      <div
+        ref={contentRef}
+        // `max-[900px]:overflow-visible` releases the inner scroll on phones
+        // so the surrounding AppShell `<main>` becomes the single scrolling
+        // container — without this the header above stays pinned and the
+        // list only gets ~50% of the viewport height.
+        class={`flex-1 overflow-y-auto overflow-x-hidden py-4 max-[900px]:overflow-visible max-[900px]:flex-none ${viewStyle === "grid" ? "px-6 max-[900px]:px-3" : "px-8 max-[900px]:px-4"}`}
+      >
         {loading ? (
           <div class="space-y-3">
             <KaomojiLoadingText label="Loading your library" index={0} />

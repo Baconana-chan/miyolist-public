@@ -199,6 +199,7 @@ pub fn run() {
             commands::clear_access_token,
             commands::get_library_snapshot,
             commands::sync_user_lists,
+            commands::get_sync_progress,
             commands::get_list_entries,
             commands::get_list_entry_by_media_id,
             commands::update_list_entry,
