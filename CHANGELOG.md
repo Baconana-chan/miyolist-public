@@ -6,7 +6,45 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+### Added
+- **Auto-updater** — checks GitHub Releases once a day (throttled), with a manual "Check for
+  updates" button in the About dialog. `UpdateDialog` offers Download & Install (with a real
+  progress bar), Remind me later, and Skip this version. Requires a signing keypair configured
+  before the first release (`bunx tauri signer generate`; pubkey in `tauri.conf.json`, private
+  key in CI secrets).
+- **MangaUpdates chapter notifications** — new-chapter alerts for CURRENT/REPEATING manga via
+  the MangaUpdates release indexer: automatic title→series linking, per-media mute switch in
+  the entry edit modal, Settings section with toggle, "Check now", mapping list, and manual
+  re-link when auto-resolution picks the wrong title.
+- **Discord Rich Presence** (desktop) — shows "Watching/Reading <title>" when list progress
+  changes, with a master toggle in Settings and a per-media privacy override ("Hide from
+  Discord") in the entry edit modal.
+- **OP/ED theme player** — themes section in `MediaDetailsPanel` (via AnimeThemes.moe):
+  OP/ED/IN list with artists and episode ranges, in-panel `<audio>` player, and per-theme
+  favourite stars stored locally (`favorite_themes` table).
+- **Configurable keyboard shortcuts** — rebindable Alt+1..6 navigation, Ctrl+F search,
+  Ctrl+Shift+S sync, F5 refresh, and Escape close, with a click-to-record "Keyboard" section
+  in Settings and conflict detection.
+- **Window management** — "Always on top" toggle and persistence/restore of window size and
+  position across launches.
+- **Schema v10** — `discord_hidden` on `notification_overrides` + `favorite_themes` table.
 
+### Changed
+- SQLite connections are now pooled instead of re-opened per command call.
+- `reqwest` requests carry a `User-Agent` header.
+- Version bumped to 2.1.0.
+
+### Fixed
+- Re-authorization flow (localhost callback on port 43821).
+- SQLite WAL backup integrity.
+- Cover-prefetch de-duplication.
+- Airing-schedule pagination and the "aired episodes" window.
+- `is_dirty` not being set on library JSON import.
+- Tray Quick Sync running on the main thread (now off-thread).
+- Dead `Volume{...}` expression in `EntryEditModal`.
+
+### Notes
+- Requires the updater signing keypair to be configured before the first release.
 
 ## [2.0.0] - 2026-04-24
 

@@ -1,8 +1,42 @@
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { AppShell } from "./app/AppShell";
+import { getAppSettings } from "./shared/api/database";
+import { mergeShortcuts, shortcutMatches } from "./shared/shortcuts";
+import type { ScreenId } from "./shared/types/app";
+
+// Screen navigation actions dispatch `go-screen` with a target screen id.
+const SCREEN_ACTIONS: Partial<Record<string, ScreenId>> = {
+  "go-screen:library": "library",
+  "go-screen:discovery": "discovery",
+  "go-screen:activity": "activity",
+  "go-screen:notifications": "notifications",
+  "go-screen:search": "search",
+  "go-screen:schedule": "schedule",
+  "go-screen:statistics": "statistics",
+  "go-screen:settings": "settings",
+};
 
 export default function App() {
+  // Hold the active shortcut map in a ref so the keydown listener can read
+  // the latest value without being re-registered on every settings change.
+  const shortcutsRef = useRef<Record<string, string>>(mergeShortcuts(undefined));
+
   useEffect(() => {
+    const applySettings = async () => {
+      try {
+        const settings = await getAppSettings();
+        shortcutsRef.current = mergeShortcuts(settings.keyboardShortcuts);
+      } catch {
+        // Keep defaults if settings can't be read.
+      }
+    };
+    applySettings();
+
+    const onSettingsChanged = () => {
+      applySettings();
+    };
+    window.addEventListener("miyolist:settings-changed", onSettingsChanged);
+
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const isTypingContext =
@@ -12,41 +46,21 @@ export default function App() {
           target.tagName === "SELECT" ||
           target.isContentEditable);
 
-      if (event.ctrlKey && event.key.toLowerCase() === "f") {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("miyolist:shortcut", { detail: { action: "focus-search" } }));
-        return;
-      }
+      const map = shortcutsRef.current;
 
-      if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("miyolist:shortcut", { detail: { action: "sync-now" } }));
-        return;
-      }
+      for (const [action, combo] of Object.entries(map)) {
+        if (!shortcutMatches(event, combo)) continue;
 
-      if (event.altKey) {
-        if (event.key === "ArrowLeft") {
-          event.preventDefault();
-          window.dispatchEvent(new CustomEvent("miyolist:shortcut", { detail: { action: "cycle-panel-left" } }));
-          return;
-        }
-        if (event.key === "ArrowRight") {
-          event.preventDefault();
-          window.dispatchEvent(new CustomEvent("miyolist:shortcut", { detail: { action: "cycle-panel-right" } }));
-          return;
+        // Escape should always dismiss overlays, even mid-typing; other
+        // single-key bindings must not hijack typing in inputs.
+        if (isTypingContext && action !== "close-overlays" && combo.split("+").length === 1) {
+          continue;
         }
 
-        const screenByDigit: Record<string, string> = {
-          "1": "library",
-          "2": "discovery",
-          "3": "activity",
-          "4": "notifications",
-          "5": "search",
-          "6": "schedule",
-        };
-        const screen = screenByDigit[event.key];
+        event.preventDefault();
+
+        const screen = SCREEN_ACTIONS[action];
         if (screen) {
-          event.preventDefault();
           window.dispatchEvent(
             new CustomEvent("miyolist:shortcut", {
               detail: { action: "go-screen", screen },
@@ -54,26 +68,24 @@ export default function App() {
           );
           return;
         }
+
+        window.dispatchEvent(new CustomEvent("miyolist:shortcut", { detail: { action } }));
+        return;
       }
 
+      // Safety net: Escape always dismisses overlays, even if it was
+      // rebound to something else in settings.
       if (event.key === "Escape") {
         window.dispatchEvent(new CustomEvent("miyolist:shortcut", { detail: { action: "close-overlays" } }));
-        return;
-      }
-
-      if (event.key === "F5") {
-        event.preventDefault();
-        window.dispatchEvent(new CustomEvent("miyolist:shortcut", { detail: { action: "refresh-surface" } }));
-        return;
-      }
-
-      if (isTypingContext) {
         return;
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("miyolist:settings-changed", onSettingsChanged);
+    };
   }, []);
 
   return <AppShell />;

@@ -1,22 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import {
+  checkMangaReleases,
   clearAiringCache,
   clearImageCache,
+  clearMangaReleaseMapping,
   clearOrphanMediaCache,
   clearSearchHistory,
   exportDatabaseBackup,
   exportLibraryJson,
   getAppSettings,
   getCacheStats,
+  getMangaReleaseMappings,
   importLibraryJson,
   getNotificationSettings,
   saveNotificationSettings,
   prefetchCovers,
   saveAppSettings,
+  searchMangaupdatesSeries,
+  setAlwaysOnTop,
+  setDiscordRpc,
+  setMangaReleaseMapping,
 } from "../../shared/api/database";
-import type { AppSettings, CacheStats, ExportResult, ImportResult, NotificationSettings } from "../../shared/types/app";
+import type {
+  AppSettings,
+  CacheStats,
+  ExportResult,
+  ImportResult,
+  MangaReleaseMapping,
+  MangaUpdatesSeries,
+  NotificationSettings,
+} from "../../shared/types/app";
 import { DropdownSelect } from "../../shared/components/DropdownSelect";
 import { AboutDialog } from "./AboutDialog";
+import {
+  comboFromEvent,
+  formatCombo,
+  mergeShortcuts,
+  SHORTCUT_ACTIONS,
+  SHORTCUT_CATEGORIES,
+  stripDefaults,
+} from "../../shared/shortcuts";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -161,10 +184,28 @@ export function SettingsSurface() {
   const [showAbout, setShowAbout] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
+  // ── Manga release tracking ──────────────────────────────────────────────
+  const [mangaMappings, setMangaMappings] = useState<MangaReleaseMapping[] | null>(null);
+  const [mangaBusy, setMangaBusy] = useState(false);
+  // Media id currently being re-linked (inline MangaUpdates search).
+  const [replacingFor, setReplacingFor] = useState<number | null>(null);
+  const [muQuery, setMuQuery] = useState("");
+  const [muResults, setMuResults] = useState<MangaUpdatesSeries[] | null>(null);
+  const [muSearching, setMuSearching] = useState(false);
+
   const notice = (text: string, kind: "ok" | "err" = "ok") => {
     setMessage({ text, kind });
     setTimeout(() => setMessage(null), 4000);
   };
+
+  const loadMangaMappings = useCallback(async () => {
+    try {
+      const mappings = await getMangaReleaseMappings();
+      setMangaMappings(mappings);
+    } catch (e) {
+      notice(String(e), "err");
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -173,10 +214,11 @@ export function SettingsSurface() {
       setCacheStats(c);
       const ns = await getNotificationSettings();
       setNotificationSettings(ns);
+      loadMangaMappings();
     } catch (e) {
       notice(String(e), "err");
     }
-  }, []);
+  }, [loadMangaMappings]);
 
   const patchNotifications = async (partial: Partial<NotificationSettings>) => {
     if (!notificationSettings) return;
@@ -189,20 +231,120 @@ export function SettingsSurface() {
     }
   };
 
-  useEffect(() => {
-    load();
-  }, []);
-
-  const patch = async (partial: Partial<AppSettings>) => {
-    if (!settings) return;
-    const next = { ...settings, ...partial };
-    setSettings(next);
+  // ── Manga release tracking handlers ─────────────────────────────────────
+  const checkMangaNow = async () => {
+    if (mangaBusy) return;
+    setMangaBusy(true);
     try {
-      await saveAppSettings(next);
+      const sent = await checkMangaReleases();
+      notice(sent > 0 ? `Checked — ${sent} new chapter notification(s)` : "Checked — no new chapters");
+      await loadMangaMappings();
+    } catch (e) {
+      notice(String(e), "err");
+    } finally {
+      setMangaBusy(false);
+    }
+  };
+
+  const beginReplace = (mapping: MangaReleaseMapping) => {
+    setReplacingFor(mapping.mediaId);
+    setMuQuery(mapping.title);
+    setMuResults(null);
+  };
+
+  const runMuSearch = async () => {
+    if (!muQuery.trim() || muSearching) return;
+    setMuSearching(true);
+    try {
+      const results = await searchMangaupdatesSeries(muQuery.trim());
+      setMuResults(results);
+    } catch (e) {
+      notice(String(e), "err");
+    } finally {
+      setMuSearching(false);
+    }
+  };
+
+  const applyMapping = async (mediaId: number, series: MangaUpdatesSeries) => {
+    try {
+      await setMangaReleaseMapping(mediaId, series.seriesId, series.title);
+      notice(`Linked to "${series.title}"`);
+      setReplacingFor(null);
+      setMuResults(null);
+      await loadMangaMappings();
     } catch (e) {
       notice(String(e), "err");
     }
   };
+
+  const removeMapping = async (mediaId: number) => {
+    try {
+      await clearMangaReleaseMapping(mediaId);
+      notice("Tracking removed");
+      await loadMangaMappings();
+    } catch (e) {
+      notice(String(e), "err");
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  // Memoized so the shortcut recorder effect below doesn't re-subscribe on
+  // every SettingsSurface re-render while a combo is being recorded.
+  const patch = useCallback(
+    async (partial: Partial<AppSettings>) => {
+      if (!settings) return;
+      const next = { ...settings, ...partial };
+      setSettings(next);
+      try {
+        await saveAppSettings(next);
+      } catch (e) {
+        notice(String(e), "err");
+      }
+    },
+    [settings],
+  );
+
+  // ── Keyboard shortcut rebinding ─────────────────────────────────────────
+  const [recordingAction, setRecordingAction] = useState<string | null>(null);
+  const shortcuts = useMemo(
+    () => mergeShortcuts(settings?.keyboardShortcuts),
+    [settings?.keyboardShortcuts],
+  );
+
+  useEffect(() => {
+    if (!recordingAction) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.key === "Escape") {
+        setRecordingAction(null);
+        return;
+      }
+      const combo = comboFromEvent(event);
+      if (!combo) return; // bare modifier press — keep recording
+
+      // Reject combos already bound to a different action.
+      const conflict = Object.entries(shortcuts).find(
+        ([action, existing]) => action !== recordingAction && existing === combo,
+      );
+      if (conflict) {
+        const label =
+          SHORTCUT_ACTIONS.find((a) => a.action === conflict[0])?.label ?? conflict[0];
+        notice(`"${formatCombo(combo)}" is already used by "${label}".`, "err");
+        setRecordingAction(null);
+        return;
+      }
+
+      const next = { ...shortcuts, [recordingAction]: combo };
+      patch({ keyboardShortcuts: JSON.stringify(stripDefaults(next)) });
+      setRecordingAction(null);
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [recordingAction, shortcuts, patch]);
 
   const run = async (fn: () => Promise<unknown>, successMsg: string) => {
     setBusy(true);
@@ -285,6 +427,72 @@ export function SettingsSurface() {
           checked={settings.minimizeToTrayOnClose}
           onChange={(v) => patch({ minimizeToTrayOnClose: v })}
         />
+        <Toggle
+          label="Keep window on top"
+          description="Pins the MiyoList window above other windows while you browse."
+          checked={settings.alwaysOnTop}
+          onChange={(v) => {
+            // The command floats the window AND persists the flag, so no
+            // separate patch is needed — just mirror the value into local
+            // state for an instant toggle.
+            setSettings((prev) => (prev ? { ...prev, alwaysOnTop: v } : prev));
+            setAlwaysOnTop(v).catch((e) => notice(String(e), "err"));
+          }}
+        />
+      </SectionBlock>
+
+      {/* Discord Rich Presence */}
+      <SectionBlock title="Discord Rich Presence">
+        <Toggle
+          label="Show activity on Discord"
+          description="Displays what you're watching or reading as your Discord status. Requires a Discord Application ID set in the build (MIYOLIST_DISCORD_APP_ID)."
+          checked={settings.discordRpcEnabled}
+          onChange={(v) => {
+            // The command connects/disconnects the RPC client AND persists the
+            // flag, so just mirror the value into local state for an instant toggle.
+            setSettings((prev) => (prev ? { ...prev, discordRpcEnabled: v } : prev));
+            setDiscordRpc(v).catch((e) => notice(String(e), "err"));
+          }}
+        />
+      </SectionBlock>
+
+      {/* Keyboard shortcuts */}
+      <SectionBlock title="Keyboard shortcuts">
+        <p class="text-xs text-[#7a746e] leading-relaxed">
+          Click a shortcut and press the new key combination to rebind it. Press
+          Esc while recording to cancel.
+        </p>
+        {SHORTCUT_CATEGORIES.map((category) => (
+          <div key={category} class="flex flex-col gap-2">
+            <p class="text-[10px] uppercase tracking-wider text-[#7a746e]">{category}</p>
+            {SHORTCUT_ACTIONS.filter((a) => a.category === category).map((def) => {
+              const combo = shortcuts[def.action] ?? "";
+              const recording = recordingAction === def.action;
+              return (
+                <div key={def.action} class="flex items-center justify-between gap-3">
+                  <span class="text-sm text-[#e8e3dc]">{def.label}</span>
+                  <button
+                    onClick={() => setRecordingAction(recording ? null : def.action)}
+                    title={`Rebind "${def.label}"`}
+                    class={`min-w-32 rounded-lg border px-3 py-1.5 text-sm font-mono transition ${
+                      recording
+                        ? "animate-pulse border-[#d97452] bg-[#d97452]/15 text-[#f29a7c]"
+                        : "border-[#3a3836] bg-[#252321] text-[#b5b0a5] hover:border-[#d97452] hover:text-[#f29a7c]"
+                    }`}
+                  >
+                    {recording ? "Press keys…" : formatCombo(combo)}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        <button
+          onClick={() => patch({ keyboardShortcuts: "{}" })}
+          class="self-start rounded-lg border border-[#3a3836] px-4 py-2 text-sm text-[#b5b0a5] transition hover:border-[#d97452] hover:text-[#d97452]"
+        >
+          Reset to defaults
+        </button>
       </SectionBlock>
 
       {/* Library defaults */}
@@ -572,6 +780,136 @@ export function SettingsSurface() {
           checked={notificationSettings?.submissionsEnabled ?? true}
           onChange={(v) => patchNotifications({ submissionsEnabled: v })}
         />
+        <Toggle
+          label="Manga new chapters"
+          description="Alerts for new chapters of your CURRENT/REPEATING manga, tracked via the MangaUpdates release indexer."
+          checked={notificationSettings?.mangaReleasesEnabled ?? false}
+          onChange={(v) => patchNotifications({ mangaReleasesEnabled: v })}
+        />
+      </SectionBlock>
+
+      {/* Manga release tracking */}
+      <SectionBlock title="Manga release tracking">
+        <p class="text-xs text-[#7a746e] leading-relaxed">
+          MiyoList links your manga to series on MangaUpdates (an independent release
+          indexer) to learn when new chapters drop. Links are found automatically; if one
+          is wrong, pick the right series manually below.
+        </p>
+        <button
+          onClick={checkMangaNow}
+          disabled={mangaBusy}
+          class="self-start rounded-lg border border-[#3a3836] px-4 py-2 text-sm text-[#b5b0a5] transition hover:border-[#d97452] hover:text-[#d97452] disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {mangaBusy ? "Checking…" : "Check for new chapters now"}
+        </button>
+
+        {mangaMappings === null ? (
+          <p class="text-xs text-[#7a746e]">Loading tracked titles…</p>
+        ) : mangaMappings.length === 0 ? (
+          <p class="text-xs text-[#7a746e]">
+            Nothing tracked yet — links are created automatically the next time
+            chapters are checked (manga with CURRENT / REPEATING status).
+          </p>
+        ) : (
+          <div class="flex flex-col gap-2">
+            {mangaMappings.map((mapping) => (
+              <div
+                key={mapping.mediaId}
+                class="flex items-center justify-between gap-3 rounded-lg bg-[#252321] border border-[#3a3836] px-3 py-2"
+              >
+                <div class="min-w-0 flex-1">
+                  <p class="truncate text-sm font-medium text-[#e8e3dc]">{mapping.title}</p>
+                  <p class="truncate text-xs text-[#7a746e]">
+                    {mapping.muTitle ? (
+                      <>
+                        ↳ {mapping.muTitle}{" "}
+                        <span class={mapping.manual ? "text-[#d97452]" : "text-[#5e7a90]"}>
+                          · {mapping.manual ? "manual" : "auto"}
+                        </span>
+                      </>
+                    ) : (
+                      "Not linked"
+                    )}
+                  </p>
+                </div>
+                <div class="flex shrink-0 gap-1.5">
+                  <button
+                    onClick={() => beginReplace(mapping)}
+                    class="rounded-lg border border-[#3a3836] px-2.5 py-1 text-xs text-[#b5b0a5] transition hover:border-[#d97452] hover:text-[#d97452]"
+                  >
+                    {mapping.muTitle ? "Change" : "Link"}
+                  </button>
+                  {mapping.muTitle && (
+                    <button
+                      onClick={() => removeMapping(mapping.mediaId)}
+                      class="rounded-lg border border-[#ef4444]/30 px-2.5 py-1 text-xs text-[#ef4444] transition hover:bg-[#ef4444]/10"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {replacingFor !== null && (
+          <div class="flex flex-col gap-2 rounded-lg bg-[#1f1d1b] border border-[#d97452]/30 p-3">
+            <p class="text-xs text-[#b5b0a5]">
+              Search MangaUpdates to replace the link for{" "}
+              <span class="text-[#e8e3dc]">
+                {mangaMappings?.find((m) => m.mediaId === replacingFor)?.title ?? "this title"}
+              </span>:
+            </p>
+            <div class="flex gap-2">
+              <input
+                type="text"
+                value={muQuery}
+                onInput={(e) => setMuQuery((e.target as HTMLInputElement).value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") runMuSearch();
+                  if (e.key === "Escape") setReplacingFor(null);
+                }}
+                placeholder="Search MangaUpdates…"
+                class="flex-1 bg-[#2e2c2a] border border-[#3a3836] text-[#e8e3dc] text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-[#d97452] placeholder:text-[#5a5650]"
+              />
+              <button
+                onClick={runMuSearch}
+                disabled={muSearching || !muQuery.trim()}
+                class="px-3 py-1.5 rounded-lg bg-[#d97452] text-white text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#c8663f] transition-colors"
+              >
+                {muSearching ? "…" : "Search"}
+              </button>
+            </div>
+            {muResults && (
+              <div class="flex max-h-48 flex-col gap-1 overflow-y-auto pr-1">
+                {muResults.length === 0 ? (
+                  <p class="text-xs text-[#7a746e]">No matches found.</p>
+                ) : (
+                  muResults.map((series) => (
+                    <button
+                      key={series.seriesId}
+                      onClick={() => applyMapping(replacingFor, series)}
+                      class="flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-left transition hover:bg-white/6"
+                    >
+                      <span class="min-w-0 truncate text-sm text-[#e8e3dc]">{series.title}</span>
+                      <span class="shrink-0 text-xs text-[#7a746e]">
+                        {series.seriesType ?? "?"}
+                        {series.year ? ` · ${series.year}` : ""}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+            <button
+              onClick={() => setReplacingFor(null)}
+              class="self-end text-xs text-[#7a746e] transition hover:text-[#b5b0a5]"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </SectionBlock>
 
       {/* About */}

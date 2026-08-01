@@ -3,9 +3,14 @@ mod auth;
 mod cache;
 mod commands;
 mod db;
+#[cfg(desktop)]
+mod discord;
+mod manga_releases;
 mod models;
 mod notifications;
 mod settings;
+mod themes;
+mod updater;
 
 #[cfg(desktop)]
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -36,6 +41,70 @@ const TRAY_NOTICE_SHOWN_KEY: &str = "tray_notice_shown";
 
 #[cfg(desktop)]
 static EXITING_FROM_TRAY: AtomicBool = AtomicBool::new(false);
+
+/// Debounce guard so rapid-fire resize/move events don't hammer the DB with
+/// one write per event while the user is dragging the window.
+#[cfg(desktop)]
+static WINDOW_BOUNDS_SAVE_PENDING: AtomicBool = AtomicBool::new(false);
+
+/// Restore the main window's persisted bounds and always-on-top preference.
+/// Called once at startup, before the frontend loads.
+#[cfg(desktop)]
+fn restore_window_state(app: &tauri::AppHandle) {
+    // Ensure the settings tables exist — `setup` runs before the frontend has
+    // had a chance to call `initialize_database`.
+    let _ = crate::db::initialize_database(app);
+
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    let settings = crate::db::get_app_settings(app).unwrap_or_default();
+    if settings.always_on_top {
+        let _ = window.set_always_on_top(true);
+    }
+
+    if let Ok(Some((x, y, width, height))) = crate::db::get_window_bounds(app) {
+        let _ = window.unmaximize();
+        let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
+        let _ = window.set_size(tauri::PhysicalSize::new(width, height));
+    }
+}
+
+/// Debounced saver for window geometry: coalesces the burst of Resized/Moved
+/// events into a single DB write shortly after the last one.
+#[cfg(desktop)]
+fn schedule_window_bounds_save(app: &tauri::AppHandle) {
+    if WINDOW_BOUNDS_SAVE_PENDING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return;
+    }
+    let app = app.clone();
+    std::thread::spawn(move || {
+        // Let the burst of events settle before reading the final geometry.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        WINDOW_BOUNDS_SAVE_PENDING.store(false, Ordering::SeqCst);
+
+        if let Some(window) = app.get_webview_window("main") {
+            // Skip while maximized — the bounds would capture the maximized
+            // size, not the user's preferred restore size.
+            if window.is_maximized().unwrap_or(false) {
+                return;
+            }
+            if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
+                let _ = crate::db::save_window_bounds(
+                    &app,
+                    pos.x,
+                    pos.y,
+                    size.width,
+                    size.height,
+                );
+            }
+        }
+    });
+}
 
 #[cfg(desktop)]
 fn next_airing_label(app: &tauri::AppHandle) -> String {
@@ -91,6 +160,23 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            // DEV-ONLY override: TAURI_UPDATER_PUBKEY lets a developer point the
+            // updater at a locally-generated keypair without editing the config.
+            // Shipped binaries embed whatever is in tauri.conf.json
+            // `plugins.updater.pubkey` at build time (pubkeys are public, so the
+            // real one must be committed there before the first release — the
+            // matching private key goes into CI secrets, not the repo).
+            {
+                let mut builder = tauri_plugin_updater::Builder::new();
+                if let Ok(pubkey) = std::env::var("TAURI_UPDATER_PUBKEY") {
+                    if !pubkey.trim().is_empty() {
+                        builder = builder.pubkey(pubkey);
+                    }
+                }
+                builder.build()
+            },
+        )
         .setup(|app| {
             #[cfg(not(desktop))]
             let _ = app;
@@ -106,6 +192,24 @@ pub fn run() {
                     .item(&MenuItemBuilder::with_id(TRAY_MENU_QUIT, "Quit").build(app)?)
                     .build()?;
 
+                restore_window_state(app.handle());
+
+                // If Discord Rich Presence is enabled, connect and show the
+                // default browsing activity right away.
+                crate::discord::show_browsing(app.handle());
+
+                // Kick off a first MangaUpdates release poll in the background
+                // (respects the master toggle + online check inside).  Run it
+                // off the main thread; it makes one HTTP request per tracked
+                // series with pacing between them.
+                let poll_app = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    if let Err(e) = crate::manga_releases::poll_manga_releases(&poll_app) {
+                        eprintln!("[MANGA_RELEASES] initial poll failed: {e}");
+                    }
+                });
+
                 TrayIconBuilder::with_id(TRAY_ID)
                     .icon(app.default_window_icon().cloned().expect("default window icon missing"))
                     .tooltip("MiyoList")
@@ -116,9 +220,16 @@ pub fn run() {
                             restore_main_window(app);
                         }
                         TRAY_MENU_SYNC => {
-                            let _ = crate::anilist::fetch_viewer(app);
-                            let _ = crate::anilist::sync_lists_smart(app);
-                            update_tray_badge(app);
+                            // Menu events run on the main thread, but a sync
+                            // can take minutes under AniList rate limits and
+                            // blocks on retries — run it off-thread so the
+                            // tray and window stay responsive.
+                            let app_handle = app.clone();
+                            std::thread::spawn(move || {
+                                let _ = crate::anilist::fetch_viewer(&app_handle);
+                                let _ = crate::anilist::sync_lists_smart(&app_handle);
+                                update_tray_badge(&app_handle);
+                            });
                         }
                         TRAY_MENU_NEXT_AIRING => {
                             let title = next_airing_label(app);
@@ -152,6 +263,10 @@ pub fn run() {
             let _ = (window, event);
             #[cfg(desktop)]
             {
+                if let WindowEvent::Resized(_) | WindowEvent::Moved(_) = event {
+                    schedule_window_bounds_save(window.app_handle());
+                }
+
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     if EXITING_FROM_TRAY.load(Ordering::SeqCst) {
                         return;
@@ -211,6 +326,10 @@ pub fn run() {
             commands::reopen_auth_browser,
             commands::submit_auth_code_manually,
             commands::get_media_details,
+            commands::search_themes,
+            commands::get_themes_for_media,
+            commands::get_favorite_themes,
+            commands::toggle_favorite_theme,
             commands::push_dirty_entries,
             commands::get_airing_schedule,
             commands::get_global_airing_schedule,
@@ -220,6 +339,7 @@ pub fn run() {
             commands::save_notification_settings,
             commands::get_notification_overrides,
             commands::set_notification_override,
+            commands::set_discord_hidden,
             commands::get_anilist_notifications,
             commands::increment_episode_progress,
             commands::get_library_stats,
@@ -230,6 +350,16 @@ pub fn run() {
             commands::get_annual_wrap_up,
             commands::get_app_settings,
             commands::save_app_settings,
+            commands::check_for_updates,
+            commands::install_update,
+            commands::skip_update_version,
+            commands::set_always_on_top,
+            commands::set_discord_rpc,
+            commands::search_mangaupdates_series,
+            commands::get_manga_release_mappings,
+            commands::set_manga_release_mapping,
+            commands::clear_manga_release_mapping,
+            commands::check_manga_releases,
             commands::get_sync_log,
                         commands::get_pending_conflicts,
                         commands::resolve_conflict,

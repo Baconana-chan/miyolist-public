@@ -120,15 +120,18 @@ pub fn cache_image(app: &AppHandle, url: &str) -> Result<String, String> {
 /// spawn a thread before calling this.  Returns the number of images
 /// that were newly downloaded.
 pub fn prefetch_library_covers(app: &AppHandle) -> Result<i64, String> {
+    // Probe connectivity once before the loop.  Calling `is_online()` inside
+    // the loop would issue a separate blocking HEAD request for *every*
+    // cover (thousands of wasted probes on large libraries).
+    if !crate::anilist::is_online() {
+        return Ok(0);
+    }
+
     let urls = crate::db::get_all_cover_urls(app)?;
     let dir = image_cache_dir(app)?;
     let mut downloaded = 0i64;
 
     for url in urls {
-        if !crate::anilist::is_online() {
-            break;
-        }
-
         let filename = url_to_filename(&url);
         let path = dir.join(&filename);
         if path.exists() {

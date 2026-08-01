@@ -23,7 +23,9 @@ MiyoList is an **unofficial AniList client** that elevates your anime and manga 
 - 🔄 **Smart Queue Sync**: Dirty-flag queue that automatically syncs to AniList when you're back online.
 - 📱 **Cross-Platform Desktop**: Native-feeling application for Windows, Linux, macOS, and Android.
 - 🖼️ **Offline Cover Cache**: Local cover image cache with prefetching to save bandwidth.
-- 🔔 **System Integration**: Native OS push notifications for your airing anime.
+- 🔔 **System Integration**: Native OS push notifications for your airing anime *and* new manga chapters (via MangaUpdates).
+- 🎵 **OP/ED Themes**: Play opening/ending themes right in the media panel (AnimeThemes.moe).
+- 🎮 **Discord Rich Presence**: Show what you're watching or reading in your Discord status.
 - 📊 **Rich Statistics**: Comprehensive totals, score histograms, and a 52-week activity heatmap.
 
 ---
@@ -45,12 +47,20 @@ MiyoList is an **unofficial AniList client** that elevates your anime and manga 
 ### 🔔 Stay Updated
 - ✅ **Airing Schedule**: Your watchlist grouped by day, complete with episode progress controls.
 - ✅ **Native Notifications**: OS push notifications alert you when new episodes air.
+- ✅ **Manga Chapter Alerts**: New-chapter notifications for your CURRENT/REPEATING manga via the MangaUpdates release indexer, with per-title mute switches.
 - ✅ **Activity Log**: View your last 100 list updates with relative timestamps.
+
+### 🎵 Media & Extras
+- ✅ **OP/ED Theme Player**: In-panel playback of opening/ending themes from AnimeThemes.moe, with local favourite stars per theme.
+- ✅ **Discord Rich Presence**: "Watching/Reading <title>" status updates (desktop), with a per-media privacy override.
 
 ### 💻 Technology & Performance
 - ✅ **Tauri 2 Foundation**: Lightweight and secure desktop shell.
 - ✅ **SQLite Backend**: Handled via `rusqlite`—bundled and requires no external installs.
 - ✅ **Seamless Auth**: Localhost callback on port 43821 integrated with Windows Credential Manager.
+- ✅ **Auto-Updater**: Checks GitHub Releases once a day and installs updates from the About dialog.
+- ✅ **Configurable Hotkeys**: Rebindable keyboard shortcuts (navigation, search, sync, refresh).
+- ✅ **Window Management**: "Always on top" toggle and remembered window size/position.
 
 ---
 

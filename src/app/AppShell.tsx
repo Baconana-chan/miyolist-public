@@ -2,9 +2,10 @@ import { useState, useEffect, useRef, useCallback } from "preact/hooks";
 
 import type { JSX } from "preact/jsx-runtime";
 import { getAuthSessionStatus } from "../shared/api/auth";
-import { checkNotifications, getAppSettings, getSyncProgress, prefetchCovers, pushDirtyEntries, refreshAiringSchedule, syncUserLists } from "../shared/api/database";
+import { checkForUpdates, checkMangaReleases, checkNotifications, getAppSettings, getSyncProgress, prefetchCovers, pushDirtyEntries, refreshAiringSchedule, syncUserLists } from "../shared/api/database";
 import { useOnlineStatus } from "../shared/hooks/useOnlineStatus";
-import type { AuthSessionStatus, ScreenId } from "../shared/types/app";
+import type { AuthSessionStatus, ScreenId, SyncSummary, UpdateInfo } from "../shared/types/app";
+import { UpdateDialog } from "../features/settings/UpdateDialog";
 import { AuthSurface } from "../features/auth/AuthSurface";
 import { LibrarySurface, invalidateLibraryCache } from "../features/library/LibrarySurface";
 import { DiscoverySurface } from "../features/discovery/DiscoverySurface";
@@ -325,7 +326,17 @@ function SideSheetShortcuts({
           return;
         }
         case "sync-now": {
-          syncUserLists().catch(() => {/* silent manual sync */});
+          syncUserLists()
+            .then((summary) => {
+              if (
+                summary &&
+                (summary.synced > 0 || summary.pushed > 0 || summary.conflicts > 0)
+              ) {
+                invalidateLibraryCache();
+                setSurfaceRefreshKey((n) => n + 1);
+              }
+            })
+            .catch(() => {/* silent manual sync */});
           return;
         }
         case "go-screen": {
@@ -363,16 +374,85 @@ function SideSheetShortcuts({
   return null;
 }
 
+/**
+ * The header "Sync" button.  Owns its own polling of the Rust-side sync
+ * progress mutex so the 1s poll tick re-renders ONLY this small button —
+ * previously the poll lived in AppShellContent and re-rendered the entire
+ * shell (including the active surface, e.g. a 2.5k-entry library grid)
+ * every second for the whole sync.
+ */
+function SyncButton({ onSyncComplete }: { onSyncComplete: (s: SyncSummary | null) => void }) {
+  const [manualSyncing, setManualSyncing] = useState(false);
+  const [syncProgressText, setSyncProgressText] = useState<string>("");
+
+  async function handleManualSync() {
+    if (manualSyncing) return;
+    setManualSyncing(true);
+    setSyncProgressText("");
+
+    // Poll the Rust-side progress mutex every second so the button renders
+    // real feedback ("Pulling anime · 250") on long syncs instead of a
+    // frozen "Syncing..." for ~2 minutes on a 2.5k-entry library.
+    const pollId = setInterval(async () => {
+      try {
+        const p = await getSyncProgress();
+        if (p.active) {
+          const count = p.entries > 0 ? ` · ${p.entries}` : "";
+          setSyncProgressText(`${p.phase || "syncing"}${count}`);
+        }
+      } catch {
+        // ignore transient poll errors
+      }
+    }, 1000);
+
+    try {
+      const summary = await syncUserLists();
+      onSyncComplete(summary);
+    } catch {
+      onSyncComplete(null);
+    } finally {
+      clearInterval(pollId);
+      setManualSyncing(false);
+      setSyncProgressText("");
+    }
+  }
+
+  return (
+    <button
+      class="rounded-full border border-[rgba(255,255,255,0.12)] bg-white/5 px-3 py-1.5 text-[0.76rem] font-semibold text-[#d9d5cc] transition hover:bg-white/10 disabled:opacity-50"
+      onClick={handleManualSync}
+      disabled={manualSyncing}
+    >
+      {manualSyncing
+        ? syncProgressText
+          ? `↻ ${syncProgressText}`
+          : "Syncing…"
+        : "Sync"}
+    </button>
+  );
+}
+
 function AppShellContent() {
   const [session, setSession]   = useState<AuthSessionStatus | null>(null);
   const [screen,  setScreen]    = useState<ScreenId>("library");
   const [booting, setBooting]   = useState(true);
   const [surfaceRefreshKey, setSurfaceRefreshKey] = useState(0);
-  const [manualSyncing, setManualSyncing] = useState(false);
-  const [syncProgressText, setSyncProgressText] = useState<string>("");
   const online = useOnlineStatus();
   const mobileShell = useMobileShell();
   const wasOnlineRef = useRef<boolean>(online);
+
+  // Refresh the active surface only when a sync actually changed data.
+  // Bumping surfaceRefreshKey remounts every surface, which on a
+  // 2.5k-entry library means re-serialising + re-parsing the whole list
+  // over IPC — so skip it entirely when a sync pulled/pushed nothing.
+  const refreshLibraryIfChanged = useCallback((summary: SyncSummary | null) => {
+    if (!summary) return;
+    const changed =
+      summary.synced > 0 || summary.pushed > 0 || summary.conflicts > 0;
+    if (!changed) return;
+    invalidateLibraryCache();
+    setSurfaceRefreshKey((n) => n + 1);
+  }, []);
 
   // ── Dirty-entry flush: push any pending local edits to AniList 60 s after
   // the last edit, regardless of which screen the user is on.
@@ -386,24 +466,38 @@ function AppShellContent() {
 
   // ── Background interval sync: call sync_user_lists every N minutes based
   // on the user's autoSyncInterval setting.  A value of 0 disables it.
+  // Re-created whenever settings change (SettingsSurface dispatches
+  // "miyolist:settings-changed"), so interval changes apply immediately
+  // without an app restart.
   const bgSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  useEffect(() => {
-    // Load settings once to set up the interval.
+  const setupBgSyncInterval = useCallback(() => {
     getAppSettings()
       .then((s) => {
         const minutes = s.autoSyncInterval ?? 15;
         if (bgSyncIntervalRef.current) clearInterval(bgSyncIntervalRef.current);
+        bgSyncIntervalRef.current = null;
         if (minutes > 0) {
           bgSyncIntervalRef.current = setInterval(() => {
-            syncUserLists().catch(() => {/* silent background sync */});
+            syncUserLists()
+              .then((summary) => refreshLibraryIfChanged(summary))
+              .catch(() => {/* silent background sync */});
+            // Also check for new manga chapters (fire-and-forget; the Rust
+            // side respects the master toggle + per-media mutes).
+            checkMangaReleases().catch(() => {});
           }, minutes * 60_000);
         }
       })
       .catch(() => {/* settings unavailable — skip */});
+  }, []);
+
+  useEffect(() => {
+    setupBgSyncInterval();
+    window.addEventListener("miyolist:settings-changed", setupBgSyncInterval);
     return () => {
+      window.removeEventListener("miyolist:settings-changed", setupBgSyncInterval);
       if (bgSyncIntervalRef.current) clearInterval(bgSyncIntervalRef.current);
     };
-  }, []);
+  }, [setupBgSyncInterval]);
 
   useEffect(() => {
     getAuthSessionStatus()
@@ -413,11 +507,75 @@ function AppShellContent() {
           // Fire-and-forget: surface any OS notifications for episodes that
           // aired since the app was last open (no network request needed).
           checkNotifications().catch(() => {});
+          // Same for new manga chapters — respects the master toggle.
+          checkMangaReleases().catch(() => {});
         }
       })
       .catch(() => setSession(null))
       .finally(() => setBooting(false));
   }, []);
+
+  // Re-check the stored session periodically so a token that expires while
+  // the app is open falls back to the auth screen instead of showing raw API
+  // errors.  Cheap local read; only updates state when something changed.
+  useEffect(() => {
+    const id = setInterval(() => {
+      getAuthSessionStatus()
+        .then((s) => {
+          setSession((prev) => {
+            if (!prev) return s;
+            const changed =
+              prev.hasAccessToken !== s.hasAccessToken ||
+              prev.isTokenExpired !== s.isTokenExpired ||
+              prev.viewerId !== s.viewerId;
+            return changed ? s : prev;
+          });
+        })
+        .catch(() => {/* transient — keep current session */});
+    }, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Global toast host: the Rust command layer surfaces "saved locally, but
+  // AniList push failed" warnings via the "miyolist:toast" CustomEvent.
+  // Auto-update prompt: the Rust side throttles to once per day and respects
+  // a user-skipped version, so this is a fire-and-forget check on boot.
+  const [pendingUpdate, setPendingUpdate] = useState<UpdateInfo | null>(null);
+  useEffect(() => {
+    checkForUpdates(false)
+      .then((update) => {
+        if (update) setPendingUpdate(update);
+      })
+      .catch(() => {/* offline / no manifest — try again next launch */});
+  }, []);
+
+  const [toast, setToast] = useState<{ text: string; kind: "warn" | "ok" | "err" } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const onToast = (e: Event) => {
+      const detail = (e as CustomEvent<{ text?: string; kind?: "warn" | "ok" | "err" }>).detail;
+      if (!detail?.text) return;
+      setToast({ text: detail.text, kind: detail.kind ?? "warn" });
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), 5000);
+    };
+    window.addEventListener("miyolist:toast", onToast);
+    return () => {
+      window.removeEventListener("miyolist:toast", onToast);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  const toastBar = toast && (
+    <div class="pointer-events-none fixed bottom-5 left-1/2 z-[90] w-max max-w-[min(90vw,28rem)] -translate-x-1/2 rounded-xl border border-[rgba(217,116,82,0.35)] bg-[rgba(20,22,26,0.96)] px-4 py-2.5 text-[0.8rem] text-[#e8e3dc] shadow-2xl backdrop-blur">
+      <span
+        class={`mr-2 inline-block h-2 w-2 rounded-full ${
+          toast.kind === "err" ? "bg-[#e06b5a]" : toast.kind === "ok" ? "bg-[#7cbe8c]" : "bg-[#d9a06a]"
+        }`}
+      />
+      {toast.text}
+    </div>
+  );
 
   // Disable the native right-click context menu on desktop — the app is a
   // packaged Tauri client, not a webpage, so the browser's "Inspect / Reload"
@@ -439,11 +597,20 @@ function AppShellContent() {
     // Restore remote-dependent tasks on reconnect.
     pushDirtyEntries()
       .then(() => syncUserLists())
+      .then((summary) => refreshLibraryIfChanged(summary))
       .then(() => refreshAiringSchedule())
       .then(() => prefetchCovers())
+      .then(() => checkMangaReleases())
       .catch(() => {
         // Keep reconnect flow silent; periodic sync will retry.
       });
+    // Re-try the (throttled) update check too — if the app launched offline,
+    // the boot check failed and won't fire again until the next launch.
+    checkForUpdates(false)
+      .then((update) => {
+        if (update) setPendingUpdate(update);
+      })
+      .catch(() => {/* offline again — try on the next reconnect */});
   }, [online, session?.hasAccessToken]);
 
   if (booting) {
@@ -454,8 +621,8 @@ function AppShellContent() {
     );
   }
 
-  // Not authenticated → full-screen auth/onboarding
-  if (!session?.hasAccessToken) {
+  // Not authenticated OR the stored token has expired → full-screen auth.
+  if (!session?.hasAccessToken || session.isTokenExpired) {
     return (
       <AuthSurface
         session={session}
@@ -487,39 +654,6 @@ function AppShellContent() {
 
   const activeNav = NAV.find((item) => item.id === screen);
 
-  async function handleManualSync() {
-    if (manualSyncing) return;
-    setManualSyncing(true);
-    setSyncProgressText("");
-
-    // Poll the Rust-side progress mutex every second so the mobile sync
-    // button can render real feedback ("Pulling anime · 250") on long
-    // syncs.  Without this the button just sits at "Syncing..." for ~2
-    // minutes on a 2.5k-entry library and looks like the app froze.
-    const pollId = setInterval(async () => {
-      try {
-        const p = await getSyncProgress();
-        if (p.active) {
-          const count = p.entries > 0 ? ` · ${p.entries}` : "";
-          setSyncProgressText(`${p.phase || "syncing"}${count}`);
-        }
-      } catch {
-        // ignore transient poll errors
-      }
-    }, 1000);
-
-    try {
-      await syncUserLists();
-      invalidateLibraryCache();
-      setSurfaceRefreshKey((n) => n + 1);
-    } catch {
-      // Keep manual sync quiet in shell; feature surfaces show detailed states.
-    } finally {
-      clearInterval(pollId);
-      setManualSyncing(false);
-      setSyncProgressText("");
-    }
-  }
 
   if (mobileShell) {
     return (
@@ -538,17 +672,7 @@ function AppShellContent() {
             <h1 class="truncate text-[1.35rem] font-bold tracking-[-0.02em] text-[#f1efe7]">{activeNav?.label ?? "Screen"}</h1>
           </div>
           <div class="flex items-center gap-2">
-            <button
-              class="rounded-full border border-[rgba(255,255,255,0.12)] bg-white/5 px-3 py-1.5 text-[0.76rem] font-semibold text-[#d9d5cc] transition hover:bg-white/10 disabled:opacity-50"
-              onClick={handleManualSync}
-              disabled={manualSyncing}
-            >
-              {manualSyncing
-                ? syncProgressText
-                  ? `↻ ${syncProgressText}`
-                  : "Syncing…"
-                : "Sync"}
-            </button>
+            <SyncButton onSyncComplete={refreshLibraryIfChanged} />
             <button
               class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full border border-white/12 bg-white/5"
               onClick={() => setScreen("auth")}
@@ -601,6 +725,13 @@ function AppShellContent() {
         </nav>
 
         <SideSheetHost />
+        {toastBar}
+        {pendingUpdate && (
+          <UpdateDialog
+            initialUpdate={pendingUpdate}
+            onClose={() => setPendingUpdate(null)}
+          />
+        )}
       </div>
     );
   }
@@ -698,6 +829,13 @@ function AppShellContent() {
       </main>
 
       <SideSheetHost />
+      {toastBar}
+      {pendingUpdate && (
+        <UpdateDialog
+          initialUpdate={pendingUpdate}
+          onClose={() => setPendingUpdate(null)}
+        />
+      )}
     </div>
   );
 }

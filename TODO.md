@@ -5,6 +5,15 @@
 > and Tauri-desktop-specific features that have no Flutter equivalent.
 >
 > Priority: `[P0]` critical · `[P1]` high · `[P2]` medium · `[P3]` low/future · `[P4]` ambitious · `[P5]` moonshot
+>
+> **Recently completed.** Robustness audit: re-auth callback on port 43821, SQLite WAL backup
+> integrity, cover-prefetch dedup, airing-schedule pagination/window, `is_dirty` on import,
+> tray Quick Sync off the main thread, SQLite connection pool, dead `Volume{...}` expr removal,
+> reqwest User-Agent. Features: configurable hotkeys, always-on-top + window bounds restore,
+> Discord Rich Presence (+ per-media privacy override), OP/ED themes player (+ favourite
+> themes), MangaUpdates chapter notifications (+ per-manga mute in the edit modal), and the
+> auto-updater. All four remaining "hairs" are closed; release prep for 2.1.0 is done except
+> generating the real updater signing keypair (see Auto-updater below).
 
 ---
 
@@ -232,7 +241,7 @@ The current sync is a simple last-write-wins pull + dirty-flag push. It works we
 
 - [x] New component: `AboutDialog.tsx` accessible from Settings
 - [x] Content: app name + version (read from `tauri.conf.json` via `get_bootstrap`), app info, three external links (GitHub, AniList, website)
-- [ ] "Check for updates" button (see Auto-updater below)
+- [x] "Check for updates" button (see Auto-updater below)
 - [x] Credits / acknowledgments section
 
 ---
@@ -266,14 +275,14 @@ On large desktop screens (≥ 1400 px wide) there is enough space to show more t
 
 Unique to the desktop app — not possible in AniList web or Flutter mobile.
 
-- [ ] Add `discord-presence` or `discord-sdk` crate to `Cargo.toml`
-- [ ] Rust module `src-tauri/src/discord/mod.rs`
-- [ ] When user increments progress on an airing anime, update Discord status: "Watching {title} — Ep {n}"
-- [ ] When user opens manga, status: "Reading {title} — Ch {n}"
-- [ ] Elapsed timer per session
-- [ ] Master enable/disable toggle in Settings
-- [ ] Per-anime privacy override (same table as notification overrides)
-- [ ] Clear status on logout / app close
+- [x] Add `discord-presence` crate to `Cargo.toml` (v3.2, new closure-based API: `Client::new(u64)` + `start()`)
+- [x] Rust module `src-tauri/src/discord/mod.rs` — desktop-only, lazy `Client` behind a static mutex, auto-reconnect connection thread; App ID from `MIYOLIST_DISCORD_APP_ID` build env
+- [x] When user increments progress on an airing anime, update Discord status: "Watching {title} — Ep {n}" (hooks in `update_list_entry`, `increment_episode_progress`, `add_to_library`)
+- [x] When user updates manga, status: "Reading {title} — Ch {n}" (Discord has no Reading activity type → uses Playing + "Reading chapter X of Y" state)
+- [x] Elapsed timer per session (`ActivityTimestamps::start` = session start)
+- [x] Master enable/disable toggle in Settings ("Discord Rich Presence" section)
+- [x] Per-media Discord privacy override — `discord_hidden` flag on `notification_overrides` (schema v10); toggle in `EntryEditModal`; `update_for_media` falls back to generic browsing for hidden titles
+- [x] Clear status on app close (auto via IPC connection drop); explicit logout not wired yet
 
 ---
 
@@ -292,15 +301,19 @@ Unique to the desktop app — not possible in AniList web or Flutter mobile.
 
 ### Desktop-exclusive: Auto-updater
 
-Tauri has a built-in updater plugin.
+Tauri has a built-in updater plugin.  Updates are served from GitHub Releases
+(`latest.json` uploaded by `tauri-action`); signing keys must be configured
+before the first release (`bunx tauri signer generate`, pubkey into
+tauri.conf.json, private key into `TAURI_SIGNING_PRIVATE_KEY` CI secret).
 
-- [ ] Add `tauri-plugin-updater` to `Cargo.toml` and register in `lib.rs`
-- [ ] Add `updater` capability to `capabilities/default.json`
-- [ ] Check GitHub releases on startup (once per day, throttled)
-- [ ] Show update dialog with version number + changelog excerpt
-- [ ] "Download & Install" action that restarts the app
-- [ ] "Remind me later" / "Skip this version" options
-- [ ] Manual "Check for updates" button in About dialog
+- [x] Add `tauri-plugin-updater` to `Cargo.toml` and register in `lib.rs` (pubkey overridable via `TAURI_UPDATER_PUBKEY`)
+- [x] Add `updater` capability to `capabilities/default.json`
+- [x] Check GitHub Releases on startup (once per day, throttled — `updater_last_check_at` in app_settings)
+- [x] Show update dialog with version number + changelog excerpt (`UpdateDialog.tsx`)
+- [x] "Download & Install" action that downloads with a progress bar and restarts the app
+- [x] "Remind me later" / "Skip this version" options (skip persisted in `updater_skipped_version`)
+- [x] Manual "Check for updates" button in About dialog
+- [ ] Generate + configure real signing keypair (pubkey in tauri.conf.json, private key in CI secrets)
 
 ---
 
@@ -314,7 +327,7 @@ Tauri has a built-in updater plugin.
   - `Escape` → close open drawer/modal
   - `F5` → refresh current surface
 - [x] Show shortcut hints in tooltips
-- [ ] Configurable shortcuts in Settings (optional, low effort if done with a map)
+- [x] Configurable shortcuts in Settings — click-to-record rebinding in a new "Keyboard shortcuts" section (map of action → combo), deltas persisted in `app_settings` (`keyboardShortcuts` JSON), conflict detection, reset-to-defaults
 
 ---
 
@@ -333,8 +346,8 @@ Detect anime being played in VLC, mpv, MPC-HC via window title or player IPC.
 
 ### Window management
 
-- [ ] Persist window size and position in SQLite (`app_settings`) and restore on next launch
-- [ ] "Always on top" toggle (useful for airing schedule while watching)
+- [x] Persist window size and position in SQLite (`app_settings`, `window_bounds` JSON key) and restore on next launch — debounced save on Resized/Moved, skipped while maximized
+- [x] "Always on top" toggle in Settings (useful for airing schedule while watching) — `set_always_on_top` command + `alwaysOnTop` setting
 - [ ] Mini-compact mode: shrink window to a narrow sidebar showing only airing countdown and quick sync button
 
 ---
@@ -351,11 +364,11 @@ Detect anime being played in VLC, mpv, MPC-HC via window title or player IPC.
 
 ### Opening / Ending theme player
 
-- [ ] Integrate [AnimeThemes.moe](https://animethemes.moe) API (free, no auth required)
-- [ ] In `MediaDetailsPanel`, add "Themes" section listing all OP/ED entries
-- [ ] Play audio via `<audio>` element or Tauri-side fetch
-- [ ] Show theme name, type (OP/ED), artist, episode range
-- [ ] Favourite themes list (stored locally)
+- [x] Integrate [AnimeThemes.moe](https://animethemes.moe) API (free, no auth required) — Rust proxy module `themes/mod.rs`: `search_themes(query)`, `get_themes_for_media(media_id)` (title matched against cached `media_cache`)
+- [x] In `MediaDetailsPanel`, add "Themes" section listing all OP/ED entries
+- [x] Play audio via `<audio>` element (best video picked per theme: lowest resolution, non-NC)
+- [x] Show theme name, type (OP/ED), artist, episode range
+- [x] Favourite themes list (stored locally) — star per theme in `MediaDetailsPanel` (★/☆ toggle); `favorite_themes` table (schema v10); `get_favorite_themes` / `toggle_favorite_theme` commands
 
 ---
 
@@ -370,15 +383,31 @@ Currently loading states show bare text or nothing.
 
 ---
 
-### Manga chapter notifications via external service
+### Manga chapter notifications via MangaUpdates
 
-AniList API does not provide manga airing/release schedules.
+AniList API does not provide manga airing/release schedules, so chapter-release alerts
+are tracked through the [MangaUpdates](https://www.mangaupdates.com) release indexer — a
+pure indexer that hosts nothing and only records who released what and when.  MangaDex was
+rejected as the primary source: after incorporation it mass-removed titles, and its AUP
+requires attribution/restitution, while MangaUpdates is a neutral aggregator.
 
-- [ ] Research: MangaUpdates RSS, MangaDex API, or Kitsu API for chapter release tracking
-- [ ] Design: store a `manga_notification_overrides` table mapping `media_id → external_service_id`
-- [ ] Background polling when app is open; no Workmanager equivalent needed on desktop
-- [ ] Notify when new chapter available for a tracked manga
-- [ ] Toggle per-manga in edit modal
+- [x] Research: MangaUpdates RSS + API chosen over MangaDex / Kitsu / Jikan — verified live:
+  `POST /v1/series/search` and `GET /v1/series/{id}/rss` are public, no auth, no API key
+- [x] Design: `manga_release_cache` table mapping `media_id → mu_series_id` + `last_item_title`
+  high-water mark (schema v9; toggle on `notification_settings`)
+- [x] Rust module `manga_releases/mod.rs`: series search, auto-mapping (exact → contains →
+  first clean; doujinshi/anthology noise filtered), minimal RSS parser (quick-xml), polling
+- [x] Background polling: startup thread (+5 s), AppShell boot, reconnect, and bg-sync timer;
+  async via `spawn_blocking`; `POLL_LOCK` mutex serialises overlapping polls (no duplicate
+  notifications); 600 ms pacing between per-series requests
+- [x] Notify when a new chapter is available for CURRENT/REPEATING manga — OS notification
+  with cached cover; ≤ 3 per poll; first poll anchors the baseline without spamming history
+- [x] Master toggle + "Check now" + mapping list in Settings ("Manga release notifications"
+  section); per-media mutes reuse `notification_overrides`
+- [x] Manual link replacement when auto-resolution picks the wrong title — per-mapping inline
+  MangaUpdates search → re-link (marked `manual`, auto-resolve never overrides) → remove link
+- [x] Toggle per-manga in the edit modal — "Notify about new chapters" switch in `EntryEditModal`
+  (writes `notification_overrides.enabled`, same flag `is_manga_release_muted` reads)
 
 ---
 
@@ -402,7 +431,8 @@ The P3 OP/ED player adds a "Themes" section inside `MediaDetailsPanel`. This tak
 - [ ] **Lyrics support** — integrate [LRCLIB](https://lrclib.net/) (free, no auth) for synced lyrics overlay on the full-screen player
 - [ ] **Queue management** — drag-to-reorder queue, shuffle, repeat-one / repeat-all modes
 - [ ] **Theme video mode** — AnimeThemes provides `.webm` theme videos; offer a toggle to play video instead of audio-only on desktop
-- [ ] Rust side: `search_themes(query)`, `get_themes_for_media(media_id)`, `get_themes_for_artist(slug)` — thin proxies to AnimeThemes REST API
+- [x] Rust side: `search_themes(query)`, `get_themes_for_media(media_id)` — thin proxies to AnimeThemes REST API (implemented as part of the P3 OP/ED player)
+- [ ] Rust side: `get_themes_for_artist(slug)` — thin proxy to AnimeThemes REST API (not yet implemented)
 
 ---
 
@@ -458,22 +488,20 @@ For titles that simply don't exist on AniList — doujin works, indie production
 
 ---
 
-## 📋 Schema migration checklist (for P0 items)
+## 📋 Schema migration checklist
 
-When bumping `SCHEMA_VERSION` from 5 → 6 in `db/mod.rs`:
+Current `SCHEMA_VERSION` is **10**.  Migration history in `db/mod.rs`: v1 initial schema, v2 explicit
+columns + activity log/favorites, v3 case normalisation, v4 airing `notified` flag, v5 stats seeds,
+v6 `sync_log`, v7 `pending_conflicts`, v8 `notification_overrides`, v9 MangaUpdates release tracking
+(`manga_release_cache` + `manga_releases_enabled`), v10 `discord_hidden` on `notification_overrides`
++ `favorite_themes` table.  Reference SQL for the oldest P0 migration (v6):
 
 ```sql
--- v6 additions
+-- v6 additions (entry-edit P0 fields; notification_overrides came later in v8)
 ALTER TABLE media_list_entries ADD COLUMN progress_volumes INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE media_list_entries ADD COLUMN start_date TEXT;
 ALTER TABLE media_list_entries ADD COLUMN completed_date TEXT;
 ALTER TABLE media_list_entries ADD COLUMN repeat INTEGER NOT NULL DEFAULT 0;
-
-CREATE TABLE IF NOT EXISTS notification_overrides (
-    media_id INTEGER PRIMARY KEY,
-    enabled  INTEGER NOT NULL DEFAULT 1,  -- 0 = muted, 1 = inherit global, 2 = forced on
-    discord_enabled INTEGER NOT NULL DEFAULT 1
-);
 ```
 
 ---
@@ -495,11 +523,13 @@ CREATE TABLE IF NOT EXISTS notification_overrides (
 | Score format | `shared/components/EntryEditModal.tsx`, `features/library/LibrarySurface.tsx` | `commands/mod.rs`, `db/mod.rs` |
 | Custom lists | `shared/components/EntryEditModal.tsx` | `commands/mod.rs`, `anilist/mod.rs` |
 | About dialog | `features/settings/AboutDialog.tsx` (NEW) | — |
-| Discord RPC | `features/settings/SettingsSurface.tsx` | `discord/mod.rs` (NEW), `lib.rs` |
+| Discord RPC (+ per-media privacy) | `features/settings/SettingsSurface.tsx`, `shared/components/EntryEditModal.tsx` | `discord/mod.rs` (NEW), `commands/mod.rs`, `db/mod.rs` (v10 `discord_hidden`), `models/mod.rs` |
+| Window management | `features/settings/SettingsSurface.tsx` | `lib.rs`, `commands/mod.rs`, `db/mod.rs`, `models/mod.rs` |
 | System tray | `App.tsx` | `lib.rs`, Tauri config |
-| Auto-updater | `shared/components/UpdateDialog.tsx` (NEW) | `lib.rs`, `Cargo.toml` |
-| Keyboard shortcuts | `App.tsx`, `app/navigation.ts` | — |
+| Auto-updater | `features/settings/UpdateDialog.tsx` (NEW), `features/settings/AboutDialog.tsx`, `app/AppShell.tsx`, `shared/api/database.ts`, `shared/types/app.ts` | `updater/mod.rs` (NEW), `lib.rs`, `commands/mod.rs`, `db/mod.rs`, `models/mod.rs`, `Cargo.toml` |
+| Keyboard shortcuts | `App.tsx`, `app/navigation.ts`, `features/settings/SettingsSurface.tsx`, `shared/shortcuts.ts` (NEW) | `db/mod.rs`, `models/mod.rs` |
 | Media player detect | `features/settings/SettingsSurface.tsx` | `player/mod.rs` (NEW) |
 | Loading skeletons | `shared/components/Skeleton.tsx` (NEW) | — |
 | Onboarding | `features/onboarding/OnboardingSurface.tsx` (NEW) | `commands/mod.rs` |
-| OP/ED themes | `features/media/MediaDetailsPanel.tsx` | `commands/mod.rs` (AnimeThemes proxy) |
+| OP/ED themes (+ favourites) | `features/media/MediaDetailsPanel.tsx` | `themes/mod.rs` (NEW), `commands/mod.rs`, `models/mod.rs`, `db/mod.rs` (v10 `favorite_themes`) |
+| MangaUpdates notifications (+ edit-modal mute) | `features/settings/SettingsSurface.tsx`, `app/AppShell.tsx`, `shared/api/database.ts`, `shared/types/app.ts`, `shared/components/EntryEditModal.tsx` | `manga_releases/mod.rs` (NEW), `commands/mod.rs`, `db/mod.rs`, `models/mod.rs`, `lib.rs` |

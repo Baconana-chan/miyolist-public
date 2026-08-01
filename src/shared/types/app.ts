@@ -325,11 +325,15 @@ export interface NotificationSettings {
   followsEnabled: boolean;
   mediaEnabled: boolean;
   submissionsEnabled: boolean;
+  /** New-chapter alerts for manga via the MangaUpdates release indexer. */
+  mangaReleasesEnabled: boolean;
 }
 
 export interface NotificationOverride {
   mediaId: number;
   enabled: boolean;
+  /** Per-media "hide from Discord Rich Presence" (desktop). */
+  discordHidden: boolean;
 }
 
 export interface AniListNotificationItem {
@@ -444,6 +448,62 @@ export interface AppSettings {
   scoreFormat: string;
   /** When enabled, closing the main window hides the app to system tray instead of exiting. */
   minimizeToTrayOnClose: boolean;
+  /** JSON delta map of keyboard shortcuts (action → combo), see shared/shortcuts.ts. */
+  keyboardShortcuts: string;
+  /** Keep the main window above other windows (desktop only). */
+  alwaysOnTop: boolean;
+  /** Show Discord Rich Presence when list progress changes (desktop only). */
+  discordRpcEnabled: boolean;
+}
+
+// ─── AnimeThemes.moe (OP/ED) ────────────────────────────────────────────────
+
+export interface ThemeVideo {
+  id: number;
+  link: string;
+  basename?: string | null;
+  resolution?: number | null;
+  nc: boolean;
+  subbed: boolean;
+  lyrics: boolean;
+  uncen: boolean;
+  tags?: string | null;
+}
+
+export interface ThemeEntry {
+  id: number;
+  episodes?: string | null;
+  version?: number | null;
+  videos: ThemeVideo[];
+}
+
+export interface MediaTheme {
+  id: number;
+  /** `"OP"` | `"ED"` | `"IN"` */
+  themeType: string;
+  sequence?: number | null;
+  songTitle: string;
+  artists: string[];
+  entries: ThemeEntry[];
+}
+
+export interface ThemeAnime {
+  id: number;
+  name: string;
+  slug: string;
+  mediaFormat?: string | null;
+  year?: number | null;
+  themes: MediaTheme[];
+}
+
+export interface FavoriteTheme {
+  mediaId: number;
+  themeId: number;
+  /** `"OP"` | `"ED"` | `"IN"` */
+  themeType: string;
+  songTitle: string;
+  artists: string[];
+  addedAt: string;
 }
 
 export interface CacheStats {
@@ -625,6 +685,42 @@ export interface UserMediaListItem {
   progress: number;
   progressVolumes: number;
   updatedAt: number;
+}
+
+// ─── Auto-updater ───────────────────────────────────────────────────────────
+
+export interface UpdateInfo {
+  /** Version of the available update, e.g. `"2.1.0"`. */
+  version: string;
+  /** Version currently installed. */
+  currentVersion: string;
+  /** Release publish date (RFC 3339), when the manifest provides one. */
+  date: string | null;
+  /** Release notes / changelog excerpt. */
+  body: string | null;
+}
+
+// ─── MangaUpdates (release indexer) ─────────────────────────────────────────
+
+export interface MangaUpdatesSeries {
+  seriesId: number;
+  title: string;
+  url: string;
+  seriesType: string | null;
+  year: string | null;
+}
+
+export interface MangaReleaseMapping {
+  mediaId: number;
+  mediaType: string;
+  /** Media title from the local cache. */
+  title: string;
+  muSeriesId: number | null;
+  muTitle: string | null;
+  /** Title of the newest RSS item already notified (high-water mark). */
+  lastItemTitle: string | null;
+  /** True when the user manually picked the link. */
+  manual: boolean;
 }
 
 // ─── People / search results ─────────────────────────────────────────────────

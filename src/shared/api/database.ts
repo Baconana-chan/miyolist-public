@@ -11,31 +11,37 @@ import type {
   DatabaseInitResult,
   DatabaseOverview,
   ExportResult,
+  FavoriteTheme,
+  FollowingActivityItem,
   GlobalAiringEntry,
   HeatmapDay,
   ImportResult,
   LibrarySnapshot,
   LibraryStats,
   ListEntry,
+  MangaReleaseMapping,
+  MangaUpdatesSeries,
   MediaDetails,
   MediaSearchResult,
+  MediaTheme,
   MonthlyActivityCount,
-  NotificationSettings,
   NotificationOverride,
+  NotificationSettings,
+  PendingConflict,
   PersonSearchResult,
+  SocialUser,
   StaffDetails,
   StudioDetails,
   StudioSearchResult,
   SyncLogEntry,
   SyncProgress,
   SyncSummary,
-  FollowingActivityItem,
-  SocialUser,
-  UserMediaListItem,
+  ThemeAnime,
+  UpdateInfo,
   UserFavorites,
+  UserMediaListItem,
   UserProfile,
   UserSearchResult,
-  PendingConflict,
 } from "../types/app";
 
 import {
@@ -72,6 +78,15 @@ function isLikelyNetworkError(error: unknown) {
     || message.includes("ECONN")
     || message.includes("ENOTFOUND")
   );
+}
+
+/**
+ * Fire-and-forget global toast.  AppShell listens for "miyolist:toast" and
+ * renders it as a transient bottom bar.
+ */
+function notifyToast(text: string, kind: "warn" | "ok" | "err" = "warn") {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent("miyolist:toast", { detail: { text, kind } }));
 }
 
 async function invokeRemote<T>(
@@ -162,14 +177,20 @@ export function updateListEntry(
   notes: string | null,
   customLists: string[] | null,
 ) {
-  return invoke<void>("update_list_entry", {
+  // The command returns a warning string when the local save succeeded but
+  // the AniList push failed (retried on the next sync).
+  return invoke<string | null>("update_list_entry", {
     localId, mediaId, status, score, progress,
     progressVolumes, repeatCount, startDate, completedDate, notes, customLists,
+  }).then((warning) => {
+    if (warning) notifyToast(warning);
   });
 }
 
 export function deleteListEntry(localId: number, anilistEntryId: number | null) {
-  return invoke<void>("delete_list_entry", { localId, anilistEntryId });
+  return invoke<string | null>("delete_list_entry", { localId, anilistEntryId }).then((warning) => {
+    if (warning) notifyToast(warning);
+  });
 }
 
 export function searchMedia(
@@ -217,7 +238,9 @@ export function addToLibrary(
   title: string | null,
   coverImage: string | null,
 ) {
-  return invoke<void>("add_to_library", { mediaId, mediaType, status, title, coverImage });
+  return invoke<string | null>("add_to_library", { mediaId, mediaType, status, title, coverImage }).then((warning) => {
+    if (warning) notifyToast(warning);
+  });
 }
 
 export function getMediaDetails(mediaId: number) {
@@ -278,6 +301,59 @@ export function setNotificationOverride(mediaId: number, enabled: boolean) {
   return invoke<void>("set_notification_override", { mediaId, enabled });
 }
 
+/** Hides (or un-hides) a media title from the Discord Rich Presence (desktop). */
+export function setDiscordHidden(mediaId: number, hidden: boolean) {
+  return invoke<void>("set_discord_hidden", { mediaId, hidden });
+}
+
+// ─── Auto-updater ─────────────────────────────────────────────────────────────
+
+/**
+ * Checks GitHub Releases for a newer version.  `force` bypasses the 24 h
+ * throttle (manual "Check for updates" from About); a user-skipped version is
+ * still respected.  Resolves to the available update, or null when up to date.
+ */
+export function checkForUpdates(force = false) {
+  return invoke<UpdateInfo | null>("check_for_updates", { force });
+}
+
+/** Downloads + installs the latest release, then restarts the app. */
+export function installUpdate() {
+  return invoke<void>("install_update");
+}
+
+/** Remembers a version the user asked to skip so it stops being offered. */
+export function skipUpdateVersion(version: string) {
+  return invoke<void>("skip_update_version", { version });
+}
+
+// ─── MangaUpdates release tracking ───────────────────────────────────────────
+
+/** Search MangaUpdates by title (public API, no auth). */
+export function searchMangaupdatesSeries(query: string) {
+  return invoke<MangaUpdatesSeries[]>("search_mangaupdates_series", { query });
+}
+
+/** All stored AniList→MangaUpdates links (for the Settings UI). */
+export function getMangaReleaseMappings() {
+  return invoke<MangaReleaseMapping[]>("get_manga_release_mappings");
+}
+
+/** Manually (re)link a manga entry to a MangaUpdates series. */
+export function setMangaReleaseMapping(mediaId: number, muSeriesId: number, muTitle: string) {
+  return invoke<void>("set_manga_release_mapping", { mediaId, muSeriesId, muTitle });
+}
+
+/** Remove a MangaUpdates link (stops tracking that entry). */
+export function clearMangaReleaseMapping(mediaId: number) {
+  return invoke<void>("clear_manga_release_mapping", { mediaId });
+}
+
+/** Poll tracked manga now; resolves to the number of notifications sent. */
+export function checkMangaReleases() {
+  return invoke<number>("check_manga_releases");
+}
+
 export function getAniListNotifications(
   typeFilter?: string | null,
   page = 1,
@@ -336,7 +412,23 @@ export function getAppSettings() {
 }
 
 export function saveAppSettings(settings: AppSettings) {
-  return invoke<void>("save_app_settings", { settings });
+  return invoke<void>("save_app_settings", { settings }).then(() => {
+    // Let the shell re-read settings (e.g. the auto-sync interval) so changes
+    // apply immediately without an app restart.
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("miyolist:settings-changed"));
+    }
+  });
+}
+
+/** Toggle the main window's "always on top" state and persist the preference. */
+export function setAlwaysOnTop(enabled: boolean) {
+  return invoke<void>("set_always_on_top", { enabled });
+}
+
+/** Toggle Discord Rich Presence and persist the preference (desktop only). */
+export function setDiscordRpc(enabled: boolean) {
+  return invoke<void>("set_discord_rpc", { enabled });
 }
 
 // ─── Cache management ──────────────────────────────────────────────────────────
@@ -363,6 +455,40 @@ export function clearImageCache() {
 
 export function prefetchCovers() {
   return invokeRemote<void>("prefetch_covers", undefined, () => undefined);
+}
+
+// ─── AnimeThemes.moe (OP/ED) ─────────────────────────────────────────────────
+
+/** Search AnimeThemes.moe by anime title; returns matches with their OP/ED list. */
+export function searchThemes(query: string) {
+  return invoke<ThemeAnime[]>("search_themes", { query });
+}
+
+/** Fetch OP/ED themes for a media entry by its locally cached title. */
+export function getThemesForMedia(mediaId: number) {
+  return invoke<MediaTheme[]>("get_themes_for_media", { mediaId });
+}
+
+/** All OP/ED themes the user starred for a media entry (local favourites). */
+export function getFavoriteThemes(mediaId: number) {
+  return invoke<FavoriteTheme[]>("get_favorite_themes", { mediaId });
+}
+
+/** Adds/removes a theme to/from the media's favourites. Resolves to the new state. */
+export function toggleFavoriteTheme(
+  mediaId: number,
+  themeId: number,
+  themeType: string,
+  songTitle: string,
+  artists: string[],
+) {
+  return invoke<boolean>("toggle_favorite_theme", {
+    mediaId,
+    themeId,
+    themeType,
+    songTitle,
+    artists,
+  });
 }
 
 export function getCachedImagePath(url: string) {

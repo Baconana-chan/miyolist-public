@@ -1,18 +1,22 @@
-use std::{fs, path::PathBuf};
+use std::collections::HashMap;
+use std::fs;
+use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
 
 use rusqlite::{Connection, OptionalExtension};
 use tauri::{AppHandle, Manager};
 
 use crate::models::{
     ActivityEntry, AppSettings, BreakdownItem, CacheStats, DatabaseInitResult, DatabaseOverview,
-    DatabaseTableInfo, ExportResult, FoundationModule, HeatmapDay, ImportResult, LibrarySnapshot,
-    LibraryStats, MonthlyActivityCount, NotificationOverride, NotificationSettings,
-    PendingConflict, ScoreBucket, SyncLogEntry,
+    DatabaseTableInfo, ExportResult, FavoriteTheme, FoundationModule, HeatmapDay, ImportResult,
+    LibrarySnapshot, LibraryStats, MangaReleaseMapping, MonthlyActivityCount,
+    NotificationOverride, NotificationSettings, PendingConflict, ScoreBucket, SyncLogEntry,
 };
 
 const DATABASE_FILE_NAME: &str = "miyolist.sqlite3";
-const SCHEMA_VERSION: i64 = 8;
-const PRODUCT_TABLES: [&str; 14] = [
+const SCHEMA_VERSION: i64 = 10;
+const PRODUCT_TABLES: [&str; 16] = [
     "app_settings",
     "auth_session",
     "media_cache",
@@ -27,6 +31,8 @@ const PRODUCT_TABLES: [&str; 14] = [
     "favorites",
     "sync_log",
     "pending_conflicts",
+    "manga_release_cache",
+    "favorite_themes",
 ];
 
 pub fn foundation_summary() -> FoundationModule {
@@ -85,12 +91,84 @@ pub(crate) fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app_data_dir.join(DATABASE_FILE_NAME))
 }
 
-/// Opens a SQLite connection and applies session-scoped PRAGMAs.
+/// Idle SQLite connections keyed by database path.  Reusing connections avoids
+/// re-running the per-connection PRAGMA setup on every command call, which
+/// used to add overhead to each of the ~60 call sites.
+static CONNECTION_POOL: OnceLock<Mutex<HashMap<PathBuf, Vec<Connection>>>> = OnceLock::new();
+
+/// Upper bound on idle connections kept per database path.  Connections beyond
+/// this are simply closed when returned (they are never shared concurrently).
+const MAX_IDLE_CONNECTIONS: usize = 8;
+
+/// A checked-out connection that returns itself to `CONNECTION_POOL` on drop.
+/// Derefs to `rusqlite::Connection`, so existing call sites keep working.
+pub(crate) struct PooledConnection {
+    path: PathBuf,
+    conn: Option<Connection>,
+}
+
+impl PooledConnection {
+    fn new(path: PathBuf, conn: Connection) -> Self {
+        Self { path, conn: Some(conn) }
+    }
+}
+
+impl Deref for PooledConnection {
+    type Target = Connection;
+    fn deref(&self) -> &Self::Target {
+        self.conn.as_ref().expect("pooled connection present")
+    }
+}
+
+impl DerefMut for PooledConnection {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.conn.as_mut().expect("pooled connection present")
+    }
+}
+
+impl Drop for PooledConnection {
+    fn drop(&mut self) {
+        let conn = match self.conn.take() {
+            Some(conn) => conn,
+            None => return,
+        };
+        // Never hand a connection with an open transaction to the next user:
+        // roll it back first, otherwise the pooled connection inherits a stale
+        // BEGIN from a caller that errored out mid-transaction.
+        if !conn.is_autocommit() {
+            let _ = conn.execute_batch("ROLLBACK");
+        }
+        if let Some(pool) = CONNECTION_POOL.get() {
+            if let Ok(mut guard) = pool.lock() {
+                let idle = guard.entry(self.path.clone()).or_default();
+                if idle.len() < MAX_IDLE_CONNECTIONS {
+                    idle.push(conn);
+                    return;
+                }
+            }
+        }
+        // Pool full or lock poisoned — the connection closes here.
+    }
+}
+
+/// Opens a SQLite connection (reusing one from the pool when available) and
+/// applies session-scoped PRAGMAs on newly created connections.
 ///
 /// `journal_mode = WAL` is persistent on the file so it only takes effect the
-/// first time, but setting it every time is harmless.  The other PRAGMAs are
-/// session-scoped and must be set on every new connection.
-pub(crate) fn open_connection(path: &PathBuf) -> Result<Connection, String> {
+/// first time.  The other PRAGMAs are session-scoped, so they are set only on
+/// brand-new connections; pooled connections keep their settings.
+pub(crate) fn open_connection(path: &PathBuf) -> Result<PooledConnection, String> {
+    let pool = CONNECTION_POOL.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Reuse an idle connection if one is parked for this path.
+    let idle = match pool.lock() {
+        Ok(mut guard) => guard.get_mut(path).and_then(|list| list.pop()),
+        Err(_) => None,
+    };
+    if let Some(conn) = idle {
+        return Ok(PooledConnection::new(path.clone(), conn));
+    }
+
     let conn = Connection::open(path).map_err(|e| e.to_string())?;
     conn.execute_batch(
         "
@@ -101,7 +179,7 @@ pub(crate) fn open_connection(path: &PathBuf) -> Result<Connection, String> {
         ",
     )
     .map_err(|e| e.to_string())?;
-    Ok(conn)
+    Ok(PooledConnection::new(path.clone(), conn))
 }
 
 // ─── Migration helpers ───────────────────────────────────────────────────────
@@ -172,6 +250,8 @@ fn apply_migrations(connection: &Connection) -> Result<bool, String> {
             6 => apply_v6(connection)?,
             7 => apply_v7(connection)?,
             8 => apply_v8(connection)?,
+            9 => apply_v9(connection)?,
+            10 => apply_v10(connection)?,
             _ => {}
         }
     }
@@ -557,6 +637,79 @@ fn apply_v8(connection: &Connection) -> Result<(), String> {
             );
 
             INSERT OR IGNORE INTO schema_migrations(version) VALUES (8);
+
+            COMMIT;
+            ",
+        )
+        .map_err(|error| error.to_string())
+}
+
+/// Schema v9 — MangaUpdates release tracking.
+///
+/// Adds the `manga_release_cache` table (AniList media → MangaUpdates series
+/// link + notification high-water mark) and a `manga_releases_enabled` toggle
+/// on `notification_settings`.  No existing rows are touched.
+fn apply_v9(connection: &Connection) -> Result<(), String> {
+    add_column_if_missing(
+        connection,
+        "notification_settings",
+        "manga_releases_enabled",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+
+    connection
+        .execute_batch(
+            "
+            BEGIN;
+
+            CREATE TABLE IF NOT EXISTS manga_release_cache (
+              media_id       INTEGER PRIMARY KEY,
+              media_type     TEXT NOT NULL DEFAULT 'MANGA',
+              mu_series_id   INTEGER,
+              mu_title       TEXT,
+              last_item_title TEXT,
+              manual         INTEGER NOT NULL DEFAULT 0,
+              updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            INSERT OR IGNORE INTO schema_migrations(version) VALUES (9);
+
+            COMMIT;
+            ",
+        )
+        .map_err(|error| error.to_string())
+}
+
+/// Schema v10 — per-media Discord privacy + favourite OP/ED themes.
+///
+/// Adds `discord_hidden` to `notification_overrides` so a title can stay
+/// visible in notifications but be excluded from the Discord Rich Presence
+/// (desktop only).  Creates `favorite_themes` (media → starred theme) for the
+/// OP/ED star button in the media details panel.  No existing rows are touched.
+fn apply_v10(connection: &Connection) -> Result<(), String> {
+    add_column_if_missing(
+        connection,
+        "notification_overrides",
+        "discord_hidden",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+
+    connection
+        .execute_batch(
+            "
+            BEGIN;
+
+            CREATE TABLE IF NOT EXISTS favorite_themes (
+              media_id    INTEGER NOT NULL,
+              theme_id    INTEGER NOT NULL,
+              theme_type  TEXT NOT NULL DEFAULT '',
+              song_title  TEXT NOT NULL DEFAULT '',
+              artists     TEXT NOT NULL DEFAULT '[]',
+              added_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (media_id, theme_id)
+            );
+
+            INSERT OR IGNORE INTO schema_migrations(version) VALUES (10);
 
             COMMIT;
             ",
@@ -1202,6 +1355,38 @@ pub fn get_unnotified_aired_count(app: &AppHandle) -> Result<i64, String> {
     .map_err(|e| e.to_string())
 }
 
+/// Reads a string app setting from `app_settings` by key.
+#[cfg(desktop)]
+pub fn get_string_app_setting(app: &AppHandle, key: &str) -> Result<Option<String>, String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+
+    conn.query_row(
+        "SELECT value FROM app_settings WHERE key = ?1",
+        [key],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Persists a string app setting in `app_settings` by key.
+#[cfg(desktop)]
+pub fn set_string_app_setting(app: &AppHandle, key: &str, value: &str) -> Result<(), String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+
+    conn.execute(
+        "INSERT INTO app_settings(key, value) VALUES(?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+        (key, value),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Reads a boolean app setting from `app_settings` by key.
 #[cfg(desktop)]
 pub fn get_bool_app_setting(app: &AppHandle, key: &str) -> Result<Option<bool>, String> {
@@ -1239,6 +1424,79 @@ pub fn set_bool_app_setting(app: &AppHandle, key: &str, value: bool) -> Result<(
     Ok(())
 }
 
+/// Persist the main window's outer bounds (physical pixels) so they can be
+/// restored on the next launch.  Stored as a compact JSON string under the
+/// `window_bounds` key.
+pub fn save_window_bounds(
+    app: &AppHandle,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<(), String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    let json = serde_json::json!({
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+    })
+    .to_string();
+    conn.execute(
+        "INSERT INTO app_settings(key, value) VALUES('window_bounds', ?1)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+        [json.as_str()],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Best local title for a media id (from `media_cache`), used by the
+/// AnimeThemes integration to look up OP/ED by title.
+pub fn get_cached_media_title(app: &AppHandle, media_id: i64) -> Result<String, String> {
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    let title: Option<String> = conn
+        .query_row(
+            "SELECT COALESCE(title_english, title_romaji, title_native)
+             FROM media_cache WHERE media_id = ?1",
+            [media_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(title.unwrap_or_default())
+}
+
+/// Read the persisted main-window bounds, if any.  Returns `(x, y, width, height)`
+/// in physical pixels, or `None` when the user has never resized/moved the window.
+pub fn get_window_bounds(app: &AppHandle) -> Result<Option<(i32, i32, u32, u32)>, String> {
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    let value: Option<String> = conn
+        .query_row(
+            "SELECT value FROM app_settings WHERE key = 'window_bounds'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+
+    let Some(json) = value else {
+        return Ok(None);
+    };
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json).map_err(|e| format!("invalid window_bounds: {e}"))?;
+    Ok(Some((
+        parsed.get("x").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        parsed.get("y").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        parsed.get("width").and_then(|v| v.as_u64()).unwrap_or(1280) as u32,
+        parsed.get("height").and_then(|v| v.as_u64()).unwrap_or(840) as u32,
+    )))
+}
+
 /// Marks a specific (media_id, episode) pair as notified.
 pub fn mark_airing_notified(app: &AppHandle, media_id: i64, episode: i64) -> Result<(), String> {
     let database_path = database_path(app)?;
@@ -1261,14 +1519,14 @@ pub fn get_notification_settings(app: &AppHandle) -> Result<NotificationSettings
     // Ensure a default row exists.
     conn.execute(
         "INSERT OR IGNORE INTO notification_settings
-         (id, airing_enabled, activity_enabled, forum_enabled, follows_enabled, media_enabled, submissions_enabled)
-         VALUES (1, 1, 1, 1, 1, 1, 1)",
+         (id, airing_enabled, activity_enabled, forum_enabled, follows_enabled, media_enabled, submissions_enabled, manga_releases_enabled)
+         VALUES (1, 1, 1, 1, 1, 1, 1, 0)",
         [],
     )
     .map_err(|e| e.to_string())?;
 
     conn.query_row(
-        "SELECT airing_enabled, activity_enabled, forum_enabled, follows_enabled, media_enabled, submissions_enabled
+        "SELECT airing_enabled, activity_enabled, forum_enabled, follows_enabled, media_enabled, submissions_enabled, manga_releases_enabled
          FROM notification_settings WHERE id = 1",
         [],
         |row| {
@@ -1279,6 +1537,7 @@ pub fn get_notification_settings(app: &AppHandle) -> Result<NotificationSettings
                 follows_enabled:  row.get::<_, i64>(3)? != 0,
                 media_enabled:    row.get::<_, i64>(4)? != 0,
                 submissions_enabled: row.get::<_, i64>(5)? != 0,
+                manga_releases_enabled: row.get::<_, i64>(6)? != 0,
             })
         },
     )
@@ -1293,8 +1552,8 @@ pub fn save_notification_settings(
     let conn = open_connection(&database_path)?;
     conn.execute(
         "INSERT INTO notification_settings
-                 (id, airing_enabled, activity_enabled, forum_enabled, follows_enabled, media_enabled, submissions_enabled, updated_at)
-                 VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, CURRENT_TIMESTAMP)
+                 (id, airing_enabled, activity_enabled, forum_enabled, follows_enabled, media_enabled, submissions_enabled, manga_releases_enabled, updated_at)
+                 VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, CURRENT_TIMESTAMP)
          ON CONFLICT(id) DO UPDATE SET
            airing_enabled   = excluded.airing_enabled,
            activity_enabled = excluded.activity_enabled,
@@ -1302,6 +1561,7 @@ pub fn save_notification_settings(
            follows_enabled  = excluded.follows_enabled,
            media_enabled    = excluded.media_enabled,
                      submissions_enabled = excluded.submissions_enabled,
+                     manga_releases_enabled = excluded.manga_releases_enabled,
            updated_at       = CURRENT_TIMESTAMP",
         (
             settings.airing_enabled   as i64,
@@ -1310,6 +1570,7 @@ pub fn save_notification_settings(
             settings.follows_enabled  as i64,
             settings.media_enabled    as i64,
                         settings.submissions_enabled as i64,
+                        settings.manga_releases_enabled as i64,
         ),
     )
     .map_err(|e| e.to_string())?;
@@ -1327,7 +1588,7 @@ pub fn get_notification_overrides(
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
     let mut sql =
-        String::from("SELECT media_id, enabled FROM notification_overrides WHERE media_id IN (");
+        String::from("SELECT media_id, enabled, discord_hidden FROM notification_overrides WHERE media_id IN (");
     for index in 0..media_ids.len() {
         if index > 0 {
             sql.push(',');
@@ -1345,6 +1606,7 @@ pub fn get_notification_overrides(
                 Ok(NotificationOverride {
                     media_id: row.get(0)?,
                     enabled: row.get::<_, i64>(1)? != 0,
+                    discord_hidden: row.get::<_, i64>(2)? != 0,
                 })
             },
         )
@@ -1352,6 +1614,127 @@ pub fn get_notification_overrides(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
     Ok(rows)
+}
+
+/// Sets the per-media Discord Rich Presence privacy flag (`discord_hidden`)
+/// on `notification_overrides`.  Independent of the notification `enabled`
+/// flag — a title can still produce notifications while staying out of the
+/// user's Discord status.
+pub fn set_discord_hidden(
+    app: &AppHandle,
+    media_id: i64,
+    hidden: bool,
+) -> Result<(), String> {
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    conn.execute(
+        "INSERT INTO notification_overrides (media_id, enabled, discord_hidden, updated_at)
+         VALUES (?1, 1, ?2, CURRENT_TIMESTAMP)
+         ON CONFLICT(media_id) DO UPDATE SET
+           discord_hidden = excluded.discord_hidden,
+           updated_at = CURRENT_TIMESTAMP",
+        (media_id, if hidden { 1 } else { 0 }),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// True when the user hid this media from the Discord Rich Presence.
+pub fn is_discord_hidden(app: &AppHandle, media_id: i64) -> Result<bool, String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    let hidden: Option<i64> = conn
+        .query_row(
+            "SELECT discord_hidden FROM notification_overrides WHERE media_id = ?1",
+            [media_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(hidden == Some(1))
+}
+
+// ─── Favourite OP/ED themes ──────────────────────────────────────────────────
+
+/// All themes the user starred for a media entry, newest first.
+pub fn get_favorite_themes(app: &AppHandle, media_id: i64) -> Result<Vec<FavoriteTheme>, String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT media_id, theme_id, theme_type, song_title, artists, added_at
+             FROM favorite_themes
+             WHERE media_id = ?1
+             ORDER BY added_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([media_id], |row| {
+            let artists_json: String = row.get(4)?;
+            Ok(FavoriteTheme {
+                media_id: row.get(0)?,
+                theme_id: row.get(1)?,
+                theme_type: row.get(2)?,
+                song_title: row.get(3)?,
+                artists: serde_json::from_str(&artists_json).unwrap_or_default(),
+                added_at: row.get(5)?,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Adds or removes a theme to/from the media's favourite list.  Returns the
+/// new state (`true` = now favourited).
+pub fn toggle_favorite_theme(
+    app: &AppHandle,
+    media_id: i64,
+    theme_id: i64,
+    theme_type: &str,
+    song_title: &str,
+    artists: &[String],
+) -> Result<bool, String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM favorite_themes WHERE media_id = ?1 AND theme_id = ?2)",
+            (media_id, theme_id),
+            |r| r.get::<_, i64>(0),
+        )
+        .map(|v| v != 0)
+        .map_err(|e| e.to_string())?;
+
+    if exists {
+        conn.execute(
+            "DELETE FROM favorite_themes WHERE media_id = ?1 AND theme_id = ?2",
+            (media_id, theme_id),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(false)
+    } else {
+        let artists_json =
+            serde_json::to_string(artists).unwrap_or_else(|_| "[]".to_string());
+        conn.execute(
+            "INSERT INTO favorite_themes (media_id, theme_id, theme_type, song_title, artists, added_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+             ON CONFLICT(media_id, theme_id) DO UPDATE SET
+               theme_type = excluded.theme_type,
+               song_title = excluded.song_title,
+               artists = excluded.artists,
+               added_at = CURRENT_TIMESTAMP",
+            (media_id, theme_id, theme_type, song_title, artists_json),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(true)
+    }
 }
 
 pub fn set_notification_override(
@@ -1371,6 +1754,196 @@ pub fn set_notification_override(
     )
     .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// ─── MangaUpdates release tracking ───────────────────────────────────────────
+
+/// Returns manga/novel list entries that are candidates for chapter-release
+/// tracking: `CURRENT`/`REPEATING` status, any `MANGA`/`NOVEL` list kind.
+/// Tuple: `(media_id, media_type, title, cover_image)`.
+pub fn get_tracked_manga(
+    app: &AppHandle,
+) -> Result<Vec<(i64, String, String, Option<String>)>, String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.media_id, UPPER(e.media_type),
+                    COALESCE(c.title_english, c.title_romaji, CAST(e.media_id AS TEXT)),
+                    c.cover_image
+             FROM media_list_entries e
+             LEFT JOIN media_cache c ON c.media_id = e.media_id
+             WHERE UPPER(e.media_type) IN ('MANGA','NOVEL')
+               AND LOWER(e.status) IN ('current','repeating')
+             ORDER BY e.updated_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Reads all MangaUpdates links from `manga_release_cache`, joined with the
+/// media title, for the Settings UI.
+pub fn get_manga_release_mappings(app: &AppHandle) -> Result<Vec<MangaReleaseMapping>, String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT r.media_id, r.media_type,
+                    COALESCE(c.title_english, c.title_romaji, CAST(r.media_id AS TEXT)),
+                    r.mu_series_id, r.mu_title, r.last_item_title, r.manual
+             FROM manga_release_cache r
+             LEFT JOIN media_cache c ON c.media_id = r.media_id
+             ORDER BY r.updated_at DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(MangaReleaseMapping {
+                media_id: row.get(0)?,
+                media_type: row.get(1)?,
+                title: row.get(2)?,
+                mu_series_id: row.get(3)?,
+                mu_title: row.get(4)?,
+                last_item_title: row.get(5)?,
+                manual: row.get::<_, i64>(6)? != 0,
+            })
+        })
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+/// Reads a single MangaUpdates mapping for a media id, if present.
+pub fn get_manga_release_mapping(
+    app: &AppHandle,
+    media_id: i64,
+) -> Result<Option<MangaReleaseMapping>, String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    let row = conn
+        .query_row(
+            "SELECT r.media_id, r.media_type,
+                    COALESCE(c.title_english, c.title_romaji, CAST(r.media_id AS TEXT)),
+                    r.mu_series_id, r.mu_title, r.last_item_title, r.manual
+             FROM manga_release_cache r
+             LEFT JOIN media_cache c ON c.media_id = r.media_id
+             WHERE r.media_id = ?1",
+            [media_id],
+            |row| {
+                Ok(MangaReleaseMapping {
+                    media_id: row.get(0)?,
+                    media_type: row.get(1)?,
+                    title: row.get(2)?,
+                    mu_series_id: row.get(3)?,
+                    mu_title: row.get(4)?,
+                    last_item_title: row.get(5)?,
+                    manual: row.get::<_, i64>(6)? != 0,
+                })
+            },
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(row)
+}
+
+/// Upserts the MangaUpdates link for a media entry.  `manual = true` marks a
+/// user-picked link (auto-resolution skips it afterwards).
+#[allow(clippy::too_many_arguments)]
+pub fn set_manga_release_mapping(
+    app: &AppHandle,
+    media_id: i64,
+    media_type: &str,
+    mu_series_id: i64,
+    mu_title: &str,
+    manual: bool,
+) -> Result<(), String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    conn.execute(
+        "INSERT INTO manga_release_cache (media_id, media_type, mu_series_id, mu_title, manual, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+         ON CONFLICT(media_id) DO UPDATE SET
+           media_type = excluded.media_type,
+           mu_series_id = excluded.mu_series_id,
+           mu_title = excluded.mu_title,
+           manual = excluded.manual,
+           updated_at = CURRENT_TIMESTAMP",
+        (media_id, media_type, mu_series_id, mu_title, if manual { 1 } else { 0 }),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Removes the MangaUpdates link for a media entry (stops tracking it).
+pub fn clear_manga_release_mapping(app: &AppHandle, media_id: i64) -> Result<(), String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    conn.execute(
+        "DELETE FROM manga_release_cache WHERE media_id = ?1",
+        [media_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Advances the high-water mark (last notified RSS item title) for a media id.
+pub fn update_manga_release_mark(
+    app: &AppHandle,
+    media_id: i64,
+    last_item_title: &str,
+) -> Result<(), String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    conn.execute(
+        "UPDATE manga_release_cache SET last_item_title = ?1, updated_at = CURRENT_TIMESTAMP
+         WHERE media_id = ?2",
+        (last_item_title, media_id),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// True when the user has muted notifications for this media id via
+/// `notification_overrides` (`enabled = 0`).
+///
+/// NOTE: `enabled` is the *shared* per-media notification mute — the same
+/// flag the airing schedule toggle writes (see `get_unnotified_aired`), and
+/// the same one `EntryEditModal`'s "Notify about new chapters" switch reads.
+/// It is not manga-release-specific; manga/novel entries simply never appear
+/// in `airing_cache`, so the two consumers never collide.
+pub fn is_manga_release_muted(app: &AppHandle, media_id: i64) -> Result<bool, String> {
+    initialize_database(app)?;
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    let enabled: Option<i64> = conn
+        .query_row(
+            "SELECT enabled FROM notification_overrides WHERE media_id = ?1",
+            [media_id],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    Ok(enabled == Some(0))
 }
 
 /// Increment (or decrement when `delta` is negative) the episode progress for
@@ -2126,6 +2699,9 @@ pub fn get_app_settings(app: &AppHandle) -> Result<AppSettings, String> {
             "last_synced_at" => settings.last_synced_at = Some(value),
             "score_format" => settings.score_format = value,
             "minimize_to_tray_on_close" => settings.minimize_to_tray_on_close = value == "1",
+            "keyboard_shortcuts" => settings.keyboard_shortcuts = value,
+            "always_on_top" => settings.always_on_top = value == "1",
+            "discord_rpc_enabled" => settings.discord_rpc_enabled = value == "1",
             _ => {}
         }
     }
@@ -2157,6 +2733,23 @@ pub fn save_app_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), 
         (
             "minimize_to_tray_on_close",
             if settings.minimize_to_tray_on_close {
+                "1"
+            } else {
+                "0"
+            },
+        ),
+        ("keyboard_shortcuts", settings.keyboard_shortcuts.as_str()),
+        (
+            "always_on_top",
+            if settings.always_on_top {
+                "1"
+            } else {
+                "0"
+            },
+        ),
+        (
+            "discord_rpc_enabled",
+            if settings.discord_rpc_enabled {
                 "1"
             } else {
                 "0"
@@ -2249,6 +2842,23 @@ pub fn log_sync_event(
     Ok(())
 }
 
+/// Trims `sync_log` down to the `keep` most recent rows so the table (and
+/// its two indexes) cannot grow without bound.  A single full sync of a
+/// 2.5k-entry library used to insert 2.5k `pulled` rows; pruning keeps the
+/// log readable and INSERTs fast on subsequent runs.
+pub fn prune_sync_log(app: &AppHandle, keep: i64) -> Result<(), String> {
+    let database_path = database_path(app)?;
+    let conn = open_connection(&database_path)?;
+    conn.execute(
+        "DELETE FROM sync_log WHERE id NOT IN (
+             SELECT id FROM sync_log ORDER BY id DESC LIMIT ?1
+         )",
+        [keep],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Returns the most-recent `limit` sync log entries, joined with
 /// `media_cache` to supply a human-readable title.
 pub fn get_sync_log(app: &AppHandle, limit: i64) -> Result<Vec<SyncLogEntry>, String> {
@@ -2258,7 +2868,8 @@ pub fn get_sync_log(app: &AppHandle, limit: i64) -> Result<Vec<SyncLogEntry>, St
     let mut stmt = conn
         .prepare(
             "SELECT sl.id, sl.media_id,
-                    COALESCE(mc.title_english, mc.title_romaji) AS title,
+                    COALESCE(mc.title_english, mc.title_romaji,
+                             CASE WHEN sl.media_id = 0 THEN 'Sync summary' ELSE NULL END) AS title,
                     sl.sync_type, sl.detail, sl.created_at
              FROM sync_log sl
              LEFT JOIN media_cache mc ON mc.media_id = sl.media_id
@@ -2572,7 +3183,13 @@ pub fn export_library_json(app: &AppHandle) -> Result<ExportResult, String> {
     })
 }
 
-/// Copies the live SQLite database to the exports directory.
+/// Creates a consistent snapshot of the live database in the exports
+/// directory using `VACUUM INTO`.
+///
+/// A plain `std::fs::copy` of a WAL-mode database is unsafe: writes still
+/// sitting in the `-wal` file are silently dropped from the backup, and
+/// copying while another connection is mid-write can produce a torn file.
+/// `VACUUM INTO` reads a consistent snapshot through SQLite itself.
 pub fn export_database_backup(app: &AppHandle) -> Result<ExportResult, String> {
     let database_path = database_path(app)?;
     let export_dir = export_directory(app)?;
@@ -2580,7 +3197,39 @@ pub fn export_database_backup(app: &AppHandle) -> Result<ExportResult, String> {
     let filename = format!("miyolist_{timestamp}.sqlite3");
     let dest = export_dir.join(&filename);
 
-    std::fs::copy(&database_path, &dest).map_err(|e| e.to_string())?;
+    // VACUUM INTO fails if the destination file already exists; make the
+    // name unique when two exports land in the same second.
+    let mut dest = dest;
+    let mut suffix = 0;
+    while dest.exists() {
+        suffix += 1;
+        dest = export_dir.join(&format!("miyolist_{timestamp}_{suffix}.sqlite3"));
+    }
+
+    let dest_str = dest.to_string_lossy().replace('\'', "''");
+    let conn = open_connection(&database_path)?;
+
+    // Retry a few times: if another connection (e.g. a background sync) holds
+    // a write transaction at this moment, VACUUM INTO fails with
+    // "database is locked".  A short backoff usually lets it complete.
+    let mut last_error: Option<String> = None;
+    for attempt in 0..3 {
+        match conn.execute_batch(&format!("VACUUM INTO '{dest_str}';")) {
+            Ok(()) => {
+                last_error = None;
+                break;
+            }
+            Err(e) => {
+                last_error = Some(format!("Failed to snapshot database: {e}"));
+                if attempt < 2 {
+                    std::thread::sleep(std::time::Duration::from_millis(300 * (attempt + 1)));
+                }
+            }
+        }
+    }
+    if let Some(error) = last_error {
+        return Err(error);
+    }
 
     Ok(ExportResult {
         path: dest.to_string_lossy().to_string(),
@@ -2617,7 +3266,10 @@ pub fn import_library_json(app: &AppHandle, path: String) -> Result<ImportResult
         let notes = entry["notes"].as_str();
         let started = entry["startedAt"].as_str();
         let completed = entry["completedAt"].as_str();
-        let updated = entry["updatedAt"].as_str().unwrap_or("CURRENT_TIMESTAMP");
+        // NOTE: keep `updated` as an Option.  Inserting the literal string
+        // "CURRENT_TIMESTAMP" here would persist that text instead of the SQL
+        // function; the INSERT uses COALESCE(?12, CURRENT_TIMESTAMP) instead.
+        let updated = entry["updatedAt"].as_str();
         let al_id = entry["anilistEntryId"].as_i64();
 
         if media_id == 0 {
@@ -2631,7 +3283,7 @@ pub fn import_library_json(app: &AppHandle, path: String) -> Result<ImportResult
              (media_id, media_type, list_kind, status, score, progress, progress_volumes,
               repeat_count, notes, started_at, completed_at, updated_at, anilist_entry_id,
               is_dirty, source)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,1,'import')",
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,COALESCE(?12, CURRENT_TIMESTAMP),?13,0,'import')",
             rusqlite::params![
                 media_id, media_type, list_kind, status, score, progress, progress_v, repeat_c,
                 notes, started, completed, updated, al_id,

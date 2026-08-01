@@ -1,8 +1,8 @@
-import { useState, useEffect } from "preact/hooks";
+import { useState, useEffect, useRef } from "preact/hooks";
 import { useBackHandler } from "../../shared/hooks/useBackHandler";
-import { getMediaDetails, addToLibrary, getFavorites, getListEntryByMediaId, toggleMediaFavorite, updateListEntry } from "../../shared/api/database";
+import { getMediaDetails, addToLibrary, getFavorites, getFavoriteThemes, getListEntryByMediaId, getThemesForMedia, toggleFavoriteTheme, toggleMediaFavorite, updateListEntry } from "../../shared/api/database";
 import { getViewer } from "../../shared/api/auth";
-import type { MediaDetails, ListEntry } from "../../shared/types/app";
+import type { MediaDetails, ListEntry, MediaTheme, ThemeEntry, ThemeVideo } from "../../shared/types/app";
 import { AnilistMarkdown, anilistPlainText } from "../../shared/components/AnilistMarkdown";
 import { EntryEditModal } from "../../shared/components/EntryEditModal";
 import { DropdownSelect } from "../../shared/components/DropdownSelect";
@@ -28,6 +28,187 @@ let MEDIA_FAVORITES_CACHE: Cached<{ animeIds: number[]; mangaIds: number[] }> | 
 
 function isFresh(fetchedAt: number, ttlMs: number): boolean {
   return Date.now() - fetchedAt < ttlMs;
+}
+
+// ─── Themes (OP/ED via AnimeThemes.moe) ──────────────────────────────────────
+
+/** Pick the most audio-friendly video: non-creditless first, lowest resolution. */
+function pickBestVideo(entries: ThemeEntry[]): ThemeVideo | null {
+  let best: ThemeVideo | null = null;
+  for (const entry of entries) {
+    for (const video of entry.videos) {
+      if (!video.link) continue;
+      if (!best) {
+        best = video;
+        continue;
+      }
+      const score = (v: ThemeVideo) => (v.nc ? 100_000 : 0) + (v.resolution ?? 1080);
+      if (score(video) < score(best)) best = video;
+    }
+  }
+  return best;
+}
+
+function ThemesSection({ mediaId }: { mediaId: number }) {
+  const [themes, setThemes] = useState<MediaTheme[] | null>(null);
+  const [favoriteIds, setFavoriteIds] = useState<Set<number>>(new Set());
+  const [favPending, setFavPending] = useState<Set<number>>(new Set());
+  const [active, setActive] = useState<MediaTheme | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setThemes(null);
+    setActive(null);
+    getThemesForMedia(mediaId)
+      .then((list) => {
+        if (!cancelled) setThemes(list);
+      })
+      .catch(() => {
+        if (!cancelled) setThemes([]);
+      });
+    getFavoriteThemes(mediaId)
+      .then((rows) => {
+        if (!cancelled) setFavoriteIds(new Set(rows.map((row) => row.themeId)));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [mediaId]);
+
+  async function toggleFavorite(theme: MediaTheme) {
+    if (favPending.has(theme.id)) return;
+    setFavPending((prev) => new Set(prev).add(theme.id));
+    try {
+      const nowFav = await toggleFavoriteTheme(
+        mediaId,
+        theme.id,
+        theme.themeType,
+        theme.songTitle,
+        theme.artists,
+      );
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (nowFav) {
+          next.add(theme.id);
+        } else {
+          next.delete(theme.id);
+        }
+        return next;
+      });
+    } catch {
+      // Best-effort: keep the current star state on failure.
+    } finally {
+      setFavPending((prev) => {
+        const next = new Set(prev);
+        next.delete(theme.id);
+        return next;
+      });
+    }
+  }
+
+  if (themes === null) {
+    return (
+      <div class="mt-5 px-5">
+        <p class="mb-2 text-[0.72rem] font-semibold uppercase tracking-wider text-[#5a5650]">Themes</p>
+        <div class="h-10 w-full animate-pulse rounded-xl bg-white/4" />
+      </div>
+    );
+  }
+  if (themes.length === 0) return null;
+
+  const activeVideo = active ? pickBestVideo(active.entries) : null;
+
+  const playTheme = (theme: MediaTheme) => {
+    const video = pickBestVideo(theme.entries);
+    const audio = audioRef.current;
+    if (!video || !audio) return;
+
+    // Tapping the currently-playing theme pauses it.
+    if (active?.id === theme.id && !audio.paused) {
+      audio.pause();
+      return;
+    }
+    setActive(theme);
+    if (audio.getAttribute("data-theme-id") !== String(theme.id)) {
+      audio.setAttribute("data-theme-id", String(theme.id));
+      audio.src = video.link;
+    }
+    audio.play().catch(() => {});
+  };
+
+  return (
+    <div class="mt-5 px-5 [content-visibility:auto] [contain-intrinsic-size:auto_220px]">
+      <div class="mb-2 flex items-center justify-between">
+        <p class="text-[0.72rem] font-semibold uppercase tracking-wider text-[#5a5650]">Themes (OP/ED)</p>
+        <span class="text-[0.62rem] text-[#5a5650]">via AnimeThemes.moe</span>
+      </div>
+      <div class="flex flex-col gap-1.5">
+        {themes.map((theme) => {
+          const isActive = active?.id === theme.id;
+          const episodes = theme.entries[0]?.episodes;
+          const isFav = favoriteIds.has(theme.id);
+          return (
+            <div
+              key={theme.id}
+              class={`flex w-full items-center gap-3 rounded-xl border px-3 py-2 transition ${
+                isActive
+                  ? "border-[rgba(217,116,82,0.45)] bg-[rgba(217,116,82,0.1)]"
+                  : isFav
+                    ? "border-[rgba(217,168,90,0.28)] bg-[rgba(217,168,90,0.06)]"
+                    : "border-white/8 bg-white/3 hover:bg-white/6"
+              }`}
+            >
+              <button
+                type="button"
+                class="flex min-w-0 flex-1 items-center gap-3 text-left"
+                onClick={() => playTheme(theme)}
+              >
+                <span class={`text-base leading-none ${isActive ? "text-[#d97452]" : "text-[#7a746e]"}`}>
+                  {isActive ? "⏸" : "▶"}
+                </span>
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate text-sm text-[#e8e3dc]">
+                    {theme.themeType}{theme.sequence ?? ""} · {theme.songTitle}
+                  </span>
+                  <span class="block truncate text-xs text-[#7a746e]">
+                    {theme.artists.join(", ") || "Unknown artist"}
+                    {episodes ? ` · Ep ${episodes}` : ""}
+                  </span>
+                </span>
+                {theme.entries.length > 1 && (
+                  <span class="shrink-0 rounded-full bg-white/6 px-2 py-0.5 text-[0.62rem] text-[#9a9690]">
+                    {theme.entries.length} vers
+                  </span>
+                )}
+              </button>
+              {/* Favourite star — sibling of the play button so the two never nest. */}
+              <button
+                type="button"
+                class={`shrink-0 rounded-full p-1 text-base leading-none transition ${
+                  isFav ? "text-[#d9a85a]" : "text-[#5a5650] hover:text-[#9a9690]"
+                } ${favPending.has(theme.id) ? "opacity-40" : ""}`}
+                onClick={() => toggleFavorite(theme)}
+                title={isFav ? "Remove from favourites" : "Add to favourites"}
+                aria-label={isFav ? "Remove from favourites" : "Add to favourites"}
+              >
+                {isFav ? "★" : "☆"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      {/* Always render the <audio> so the ref is valid on the first click;
+          hidden until a theme is active. */}
+      <audio
+        ref={audioRef}
+        controls
+        preload="none"
+        class={`mt-2 w-full ${activeVideo ? "" : "hidden"}`}
+      />
+    </div>
+  );
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -609,6 +790,11 @@ function DetailContent({ details, entry, onAdded, scoreFormat, customListNames, 
             ))}
           </div>
         </div>
+      )}
+
+      {/* ── Themes (OP/ED) ── */}
+      {details.mediaType?.toUpperCase() === "ANIME" && (
+        <ThemesSection mediaId={details.mediaId} />
       )}
 
       {/* ── Characters ── */}

@@ -1,7 +1,9 @@
 import { useEffect, useState } from "preact/hooks";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getBootstrapPayload } from "../../shared/api/bootstrap";
-import type { BootstrapPayload } from "../../shared/types/app";
+import { checkForUpdates } from "../../shared/api/database";
+import type { BootstrapPayload, UpdateInfo } from "../../shared/types/app";
+import { UpdateDialog } from "./UpdateDialog";
 
 interface AboutDialogProps {
   onClose: () => void;
@@ -59,6 +61,12 @@ const THIRD_PARTY_SERVICES = [
 export function AboutDialog({ onClose }: AboutDialogProps) {
   const [bootstrap, setBootstrap] = useState<BootstrapPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateState, setUpdateState] = useState<{
+    kind: "idle" | "available" | "up-to-date" | "error";
+    update?: UpdateInfo;
+    error?: string;
+  }>({ kind: "idle" });
 
   useEffect(() => {
     getBootstrapPayload()
@@ -66,6 +74,23 @@ export function AboutDialog({ onClose }: AboutDialogProps) {
       .catch((e) => console.error("Failed to load bootstrap:", e))
       .finally(() => setLoading(false));
   }, []);
+
+  const handleCheckUpdates = async () => {
+    if (updateChecking) return;
+    setUpdateChecking(true);
+    try {
+      const update = await checkForUpdates(true);
+      setUpdateState(
+        update
+          ? { kind: "available", update }
+          : { kind: "up-to-date" },
+      );
+    } catch (e) {
+      setUpdateState({ kind: "error", error: String(e) });
+    } finally {
+      setUpdateChecking(false);
+    }
+  };
 
   const handleOpenLink = async (url: string) => {
     try {
@@ -121,6 +146,30 @@ export function AboutDialog({ onClose }: AboutDialogProps) {
                 {loading ? "Loading…" : bootstrap?.primaryPlatform || "—"}
               </span>
             </div>
+            <div class="flex items-center justify-between gap-3 border-t border-[#2e2c2a] pt-3">
+              <div class="min-w-0">
+                <p class="text-[0.8rem] font-medium text-[#9a9690] uppercase tracking-wider">Updates</p>
+                <p class="mt-0.5 text-[0.74rem] text-[#7a766e]">
+                  {updateState.kind === "available"
+                    ? `v${updateState.update?.version} available`
+                    : updateState.kind === "up-to-date"
+                      ? "You're on the latest version"
+                      : updateState.kind === "error"
+                        ? "Check failed"
+                        : "Checks GitHub Releases once a day"}
+                </p>
+              </div>
+              <button
+                class="shrink-0 rounded-xl border border-[#d97452]/40 bg-[#d97452]/10 px-3 py-1.5 text-[0.8rem] font-semibold text-[#d97452] transition hover:bg-[#d97452]/20 disabled:opacity-50"
+                onClick={handleCheckUpdates}
+                disabled={updateChecking}
+              >
+                {updateChecking ? "Checking…" : "Check for updates"}
+              </button>
+            </div>
+            {updateState.kind === "error" && (
+              <p class="text-[0.74rem] text-[#e06b5a]">{updateState.error}</p>
+            )}
           </div>
 
           {/* Description */}
@@ -215,6 +264,12 @@ export function AboutDialog({ onClose }: AboutDialogProps) {
           </div>
         </div>
       </div>
+      {updateState.kind === "available" && updateState.update && (
+        <UpdateDialog
+          initialUpdate={updateState.update}
+          onClose={() => setUpdateState({ kind: "idle" })}
+        />
+      )}
     </div>
   );
 }

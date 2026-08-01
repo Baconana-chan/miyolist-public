@@ -1,6 +1,14 @@
 import { useEffect, useState } from "preact/hooks";
 import { useBackHandler } from "../hooks/useBackHandler";
-import { deleteListEntry, getFavorites, toggleMediaFavorite, updateListEntry } from "../api/database";
+import {
+  deleteListEntry,
+  getFavorites,
+  getNotificationOverrides,
+  setDiscordHidden as setDiscordHiddenRpc,
+  setNotificationOverride,
+  toggleMediaFavorite,
+  updateListEntry,
+} from "../api/database";
 import type { ListEntry } from "../types/app";
 import { DropdownSelect } from "./DropdownSelect";
 import { inputScoreToRaw, rawScoreToInput, scoreInputConfig } from "../scoreFormat";
@@ -65,6 +73,57 @@ export function EntryEditModal({
   const [error,           setError]           = useState<string | null>(null);
   const [localIsFavorite, setLocalIsFavorite] = useState<boolean>(isFavorite ?? false);
   const [localFavoritePending, setLocalFavoritePending] = useState(false);
+  const [mangaMuted, setMangaMuted] = useState(false);
+  const [discordHidden, setDiscordHidden] = useState(false);
+  const [notifPending, setNotifPending] = useState(false);
+
+  // Load the per-media notification override (manga release mute) and the
+  // Discord privacy flag for this entry so the toggles start in the right state.
+  useEffect(() => {
+    let cancelled = false;
+    getNotificationOverrides([entry.mediaId])
+      .then((rows) => {
+        if (cancelled) return;
+        const row = rows.find((r) => r.mediaId === entry.mediaId);
+        setMangaMuted(row ? !row.enabled : false);
+        setDiscordHidden(row?.discordHidden ?? false);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [entry.mediaId]);
+
+  async function handleToggleMangaMute() {
+    if (notifPending) return;
+    setNotifPending(true);
+    setError(null);
+    try {
+      // Intentional flip: `enabled = 0` means muted (see is_manga_release_muted),
+      // so passing the *current muted* state as `enabled` toggles it — do NOT
+      // "simplify" this to `!mangaMuted`, that would keep the current state.
+      await setNotificationOverride(entry.mediaId, mangaMuted);
+      setMangaMuted((prev) => !prev);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setNotifPending(false);
+    }
+  }
+
+  async function handleToggleDiscordHidden() {
+    if (notifPending) return;
+    setNotifPending(true);
+    setError(null);
+    try {
+      await setDiscordHiddenRpc(entry.mediaId, !discordHidden);
+      setDiscordHidden((prev) => !prev);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setNotifPending(false);
+    }
+  }
 
   useEffect(() => {
     setLocalCustomListNames((prev) =>
@@ -259,7 +318,7 @@ export function EntryEditModal({
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="mb-1.5 block text-[0.8rem] font-medium text-[#9a9690]">
-                  Volume{entry.episodesOrChapters != null ? "" : ""}
+                  Volumes read
                 </label>
                 <input
                   type="number" min="0"
@@ -320,6 +379,69 @@ export function EntryEditModal({
               value={notes}
               onInput={(e) => setNotes((e.target as HTMLTextAreaElement).value)}
             />
+          </div>
+
+          {/* Notifications & privacy */}
+          {isManga && (
+            <div>
+              <label class="mb-1.5 block text-[0.8rem] font-medium text-[#9a9690]">
+                Notifications
+              </label>
+              <button
+                type="button"
+                class={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${mangaMuted ? "border-white/8 bg-white/3" : "border-[rgba(217,116,82,0.3)] bg-[rgba(217,116,82,0.08)]"}`}
+                onClick={handleToggleMangaMute}
+                disabled={notifPending}
+              >
+                <span class="min-w-0">
+                  <span class="block text-[0.85rem] font-medium text-[#e8e3dc]">
+                    {mangaMuted ? "Muted" : "Notify about new chapters"}
+                  </span>
+                  <span class="block text-[0.7rem] text-[#7a746e]">
+                    {mangaMuted
+                      ? "Chapter-release alerts are turned off for this title."
+                      : "Alerts for new chapters via the MangaUpdates release indexer."}
+                  </span>
+                </span>
+                <span
+                  class={`relative h-5 w-9 shrink-0 rounded-full transition ${mangaMuted ? "bg-white/15" : "bg-[#d97452]"}`}
+                  aria-hidden="true"
+                >
+                  <span
+                    class={`absolute top-0.5 h-4 w-4 rounded-full bg-[#f1efe7] transition-all ${mangaMuted ? "left-0.5" : "left-[1.05rem]"}`}
+                  />
+                </span>
+              </button>
+            </div>
+          )}
+
+          {/* Discord privacy (desktop) */}
+          <div>
+            <button
+              type="button"
+              class={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2.5 text-left transition ${discordHidden ? "border-[rgba(217,116,82,0.3)] bg-[rgba(217,116,82,0.08)]" : "border-white/8 bg-white/3"}`}
+              onClick={handleToggleDiscordHidden}
+              disabled={notifPending}
+            >
+              <span class="min-w-0">
+                <span class="block text-[0.85rem] font-medium text-[#e8e3dc]">
+                  {discordHidden ? "Hidden from Discord" : "Show in Discord presence"}
+                </span>
+                <span class="block text-[0.7rem] text-[#7a746e]">
+                  {discordHidden
+                    ? "This title stays out of your Discord Rich Presence."
+                    : "Keep this title out of your Discord status (Rich Presence)."}
+                </span>
+              </span>
+              <span
+                class={`relative h-5 w-9 shrink-0 rounded-full transition ${discordHidden ? "bg-[#d97452]" : "bg-white/15"}`}
+                aria-hidden="true"
+              >
+                <span
+                  class={`absolute top-0.5 h-4 w-4 rounded-full bg-[#f1efe7] transition-all ${discordHidden ? "left-[1.05rem]" : "left-0.5"}`}
+                />
+              </span>
+            </button>
           </div>
 
           {/* Custom lists */}

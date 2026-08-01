@@ -27,6 +27,13 @@ const AUTH_TIMEOUT_SECS: u64 = 600;
 
 static CALLBACK_LISTENER_STATE: OnceLock<Mutex<CallbackListenerState>> = OnceLock::new();
 
+/// Set once a localhost callback listener has been bound successfully.  The
+/// accept thread never exits (it loops over `incoming()` forever), so later
+/// sign-in attempts reuse the same bound listener instead of trying to
+/// re-bind the port — which after the first successful login would fail
+/// with `AddrInUse` and permanently break auth until the app restarts.
+static CALLBACK_LISTENER_BOUND: OnceLock<()> = OnceLock::new();
+
 enum CallbackListenerState {
     NotStarted,
     Running { started_at: Instant },
@@ -187,6 +194,16 @@ fn ensure_callback_listener(app: &AppHandle) -> Result<(), String> {
         CallbackListenerState::NotStarted | CallbackListenerState::Completed => {}
     }
 
+    // A previous attempt may already have bound the port; its accept thread
+    // never exits, so on a repeat login we reuse that listener instead of
+    // re-binding (which would fail with `AddrInUse` after a completed auth).
+    if CALLBACK_LISTENER_BOUND.get().is_some() {
+        *guard = CallbackListenerState::Running {
+            started_at: Instant::now(),
+        };
+        return Ok(());
+    }
+
     let listener = TcpListener::bind((CALLBACK_BIND_HOST, CALLBACK_PORT)).map_err(|error| {
         let message = format!(
             "[LISTENER_BIND_ERROR] Failed to start localhost auth callback listener on {}:{}: {}",
@@ -196,6 +213,7 @@ fn ensure_callback_listener(app: &AppHandle) -> Result<(), String> {
         message
     })?;
 
+    let _ = CALLBACK_LISTENER_BOUND.set(());
     *guard = CallbackListenerState::Running {
         started_at: Instant::now(),
     };

@@ -2,9 +2,12 @@ pub mod remote_types;
 use remote_types::*;
 
 use std::{
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     env,
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, OnceLock,
+    },
     time::{Duration, Instant},
 };
 
@@ -90,27 +93,97 @@ fn keyring_delete() {
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
 static ONLINE_PROBE_CLIENT: OnceLock<Client> = OnceLock::new();
 
+/// Identify the app in outgoing HTTP headers.  Some endpoints reject
+/// "naked" requests without a User-Agent.
+const APP_USER_AGENT: &str =
+    concat!("miyolist/", env!("CARGO_PKG_VERSION"), " (+https://github.com/baconana/miyolist)");
+
 fn http_client() -> &'static Client {
-    HTTP_CLIENT.get_or_init(Client::new)
+    HTTP_CLIENT.get_or_init(|| {
+        Client::builder()
+            .user_agent(APP_USER_AGENT)
+            .build()
+            .unwrap_or_else(|_| Client::new())
+    })
 }
 
 fn online_probe_client() -> &'static Client {
     ONLINE_PROBE_CLIENT.get_or_init(|| {
         Client::builder()
             .timeout(Duration::from_secs(3))
+            .user_agent(APP_USER_AGENT)
             .build()
             .unwrap_or_else(|_| Client::new())
     })
 }
 
+// ─── Online status cache ──────────────────────────────────────────────────────
+
+/// `is_online()` performs a blocking HEAD probe against anilist.co.  Every
+/// gated command (sync, push, prefetch) plus the frontend's 30s poll would
+/// otherwise issue a real network round-trip on each call.  Cache the result
+/// for a few seconds so bursts of calls share one probe.
+static ONLINE_CACHE: OnceLock<Mutex<Option<(Instant, bool)>>> = OnceLock::new();
+const ONLINE_CACHE_TTL: Duration = Duration::from_secs(10);
+
 pub fn is_online() -> bool {
-    match online_probe_client().head("https://anilist.co").send() {
+    // Serve a fresh cached answer without touching the network.
+    if let Some(cache) = ONLINE_CACHE.get() {
+        if let Ok(guard) = cache.lock() {
+            if let Some((probed_at, value)) = *guard {
+                if probed_at.elapsed() < ONLINE_CACHE_TTL {
+                    return value;
+                }
+            }
+        }
+    }
+
+    let result = match online_probe_client().head("https://anilist.co").send() {
         Ok(response) => {
             response.status().is_success()
                 || response.status().is_redirection()
                 || response.status().as_u16() == 405
         }
         Err(_) => false,
+    };
+
+    let cache = ONLINE_CACHE.get_or_init(|| Mutex::new(None));
+    if let Ok(mut guard) = cache.lock() {
+        *guard = Some((Instant::now(), result));
+    }
+    result
+}
+
+// ─── Single-flight sync guard ─────────────────────────────────────────────────
+
+/// Prevents concurrent full syncs / dirty pushes from stacking: the
+/// background auto-sync interval, manual sync button, tray Quick Sync and the
+/// reconnect flow can otherwise run `sync_lists_smart` at the same time,
+/// duplicating pushes and hammering the rate limiter.
+static SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+
+fn try_begin_sync() -> bool {
+    SYNC_RUNNING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .is_ok()
+}
+
+struct SyncRunningGuard;
+
+impl Drop for SyncRunningGuard {
+    fn drop(&mut self) {
+        SYNC_RUNNING.store(false, Ordering::SeqCst);
+    }
+}
+
+fn busy_sync_summary() -> SyncSummary {
+    SyncSummary {
+        synced: 0,
+        pushed: 0,
+        failed: 0,
+        conflicts: 0,
+        is_delta: false,
+        last_synced_at: String::new(),
     }
 }
 
@@ -2216,6 +2289,52 @@ pub fn fetch_user_lists_delta(
 
         connection.execute("BEGIN", []).map_err(|e| e.to_string())?;
 
+        // Batch-load the local state for every entry on this page with a
+        // single `IN (...)` query, instead of one SELECT per entry (~50
+        // queries per page, ~2500 on a full 2.5k-entry sync).  This is the
+        // single biggest SQL win of the whole sync loop.
+        let mut local_state: HashMap<
+            i64,
+            (i64, Option<i64>, Option<String>, Option<f64>, i64, Option<String>),
+        > = HashMap::new();
+        if !entries.is_empty() {
+            let placeholders = vec!["?"; entries.len()].join(",");
+            let sql = format!(
+                "SELECT media_id, is_dirty, CAST(ani_list_updated_at AS INTEGER),
+                        status, score, progress, notes
+                 FROM media_list_entries
+                 WHERE UPPER(media_type) = ?1 AND UPPER(list_kind) = ?1
+                   AND media_id IN ({placeholders})"
+            );
+            let mut params: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(entries.len() + 1);
+            params.push(&local_type);
+            for e in &entries {
+                params.push(&e.media.id);
+            }
+            let mut stmt = connection.prepare(&sql).map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(params), |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        (
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                            row.get(5)?,
+                            row.get(6)?,
+                        ),
+                    ))
+                })
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| e.to_string())?;
+            for (media_id, state) in rows {
+                local_state.insert(media_id, state);
+            }
+        }
+
+        let mut page_added = 0i64;
         for entry in &entries {
             // Client-side delta filter: skip entries we already have at the
             // current high-water mark or older.  `since == 0` means full sync
@@ -2231,35 +2350,9 @@ pub fn fetch_user_lists_delta(
                 max_hwm = entry.updated_at;
             }
 
-            // Conflict detection (same as full sync).
-            #[allow(clippy::type_complexity)]
-            let existing: Option<(
-                i64,
-                Option<i64>,
-                Option<String>,
-                Option<f64>,
-                i64,
-                Option<String>,
-            )> = connection
-                .query_row(
-                    "SELECT is_dirty, CAST(ani_list_updated_at AS INTEGER),
-                            status, score, progress, notes
-                     FROM media_list_entries
-                     WHERE media_id = ?1 AND UPPER(media_type) = ?2 AND UPPER(list_kind) = ?2",
-                    rusqlite::params![media.id, &local_type],
-                    |r| {
-                        Ok((
-                            r.get(0)?,
-                            r.get(1)?,
-                            r.get(2)?,
-                            r.get(3)?,
-                            r.get(4)?,
-                            r.get(5)?,
-                        ))
-                    },
-                )
-                .optional()
-                .map_err(|e| e.to_string())?;
+            // Conflict detection (same as full sync) — served from the
+            // page-level map loaded above instead of a per-entry SELECT.
+            let existing = local_state.get(&media.id).cloned();
 
             if let Some((is_dirty, prev_ani_ts, loc_status, loc_score, loc_progress, loc_notes)) =
                 existing
@@ -2366,13 +2459,25 @@ pub fn fetch_user_lists_delta(
                 ),
             ).map_err(|e| e.to_string())?;
 
-            let _ = crate::db::log_sync_event(&connection, media.id, "pulled", Some("delta"));
             synced += 1;
+            page_added += 1;
         }
 
         connection
             .execute("COMMIT", [])
             .map_err(|e| e.to_string())?;
+
+        // Audit trail: one summary row per page instead of one per entry.
+        // A 2.5k-entry full sync previously wrote 2.5k `pulled` rows into
+        // sync_log, bloating the table and both of its indexes on every run.
+        if page_added > 0 {
+            let _ = crate::db::log_sync_event(
+                &connection,
+                0,
+                "pulled",
+                Some(&format!("page {page} · {page_added} entries")),
+            );
+        }
 
         // Update live progress so the UI can show "Pulling anime · page N
         // (X entries)" instead of a frozen "Syncing..." button on long syncs.
@@ -2409,6 +2514,14 @@ pub fn fetch_user_lists_delta(
 /// underlying error is returned so the frontend can display a real message
 /// instead of a misleading "Up to date".
 pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
+    // Single-flight: if another sync (auto-interval, tray Quick Sync, manual
+    // button, reconnect flow) is already running, bail out instead of
+    // stacking duplicate pushes against the same rate-limited API.
+    if !try_begin_sync() {
+        return Ok(busy_sync_summary());
+    }
+    let _sync_guard = SyncRunningGuard;
+
     // Publish a live progress snapshot so the UI can show real feedback
     // ("Pulling anime · page N · X entries") on long syncs instead of a
     // frozen "Syncing..." button — particularly important on mobile, where
@@ -2417,8 +2530,9 @@ pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
     let _progress_guard = SyncProgressGuard;
 
     // 1. Push all locally-dirty entries before pulling so the pull does not
-    //    overwrite edits we have not uploaded yet.
-    let push = push_dirty_entries(app).unwrap_or(SyncSummary {
+    //    overwrite edits we have not uploaded yet.  We call the unlocked
+    //    variant here — this function already holds the single-flight guard.
+    let push = push_dirty_entries_unlocked(app).unwrap_or(SyncSummary {
         synced: 0,
         pushed: 0,
         failed: 0,
@@ -2490,6 +2604,10 @@ pub fn sync_lists_smart(app: &AppHandle) -> Result<SyncSummary, String> {
 
     // 6. Record last-synced timestamp.
     let last_synced_at = crate::db::set_last_synced_at(app).unwrap_or_default();
+
+    // 7. Trim the sync audit log so a 2.5k-entry full sync can't grow it by
+    //    thousands of rows per run.
+    let _ = crate::db::prune_sync_log(app, 2000);
 
     Ok(SyncSummary {
         synced,
@@ -3047,7 +3165,19 @@ pub fn fetch_notifications(
 /// successful push clears the `is_dirty` flag so the same entry is not
 /// re-sent on the next sync.  Errors are logged but do not abort the loop —
 /// remaining entries are still attempted.
+/// Pushes all locally-dirty entries to AniList.  Guarded by the single-flight
+/// sync lock so it cannot run concurrently with a full `sync_lists_smart`
+/// (which would duplicate mutations against the rate-limited API).
 pub fn push_dirty_entries(app: &AppHandle) -> Result<crate::models::SyncSummary, String> {
+    if !try_begin_sync() {
+        return Ok(busy_sync_summary());
+    }
+    let _sync_guard = SyncRunningGuard;
+    push_dirty_entries_unlocked(app)
+}
+
+/// Internal push implementation.  Callers must hold the single-flight guard.
+fn push_dirty_entries_unlocked(app: &AppHandle) -> Result<crate::models::SyncSummary, String> {
     let dirty = crate::db::get_dirty_entries(app)?;
     let mut pushed = 0i64;
     let mut failed = 0i64;
@@ -3106,9 +3236,10 @@ pub fn push_dirty_entries(app: &AppHandle) -> Result<crate::models::SyncSummary,
 /// refresh).  The `airing_cache` table then acts as the offline source of
 /// truth for the Schedule screen.
 ///
-/// Fetches up to 50 upcoming episodes across all currently-watching anime.
-/// Only airing episodes that have not yet aired (`notYetAired: true`) are
-/// fetched; past episodes already in the cache are preserved.
+/// Fetches the airing schedule for all currently-watching anime: upcoming
+/// episodes (paginated, so a large CURRENT list is not truncated to one
+/// page of 50) plus a 24-hour look-back so episodes that aired while the
+/// app was closed are still pulled and can fire catch-up notifications.
 pub fn fetch_airing_schedule(app: &AppHandle) -> Result<i64, String> {
     // Collect media IDs for all CURRENT anime in the user's library.
     let database_path = crate::db::database_path(app)?;
@@ -3135,11 +3266,21 @@ pub fn fetch_airing_schedule(app: &AppHandle) -> Result<i64, String> {
     let config = load_config()?;
     let access_token = read_access_token(app)?;
 
-    // AniList accepts mediaId_in as an array variable.
+    // AniList accepts mediaId_in as an array variable.  We paginate because
+    // a large CURRENT list can exceed perPage 50, and we query from 24h in
+    // the past (not just `notYetAired`) so recently aired episodes are still
+    // fetched and can be notified if the app was closed when they aired.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let lookback_from = now.saturating_sub(24 * 60 * 60);
+
     let gql = "
-        query AiringSchedule($ids: [Int], $page: Int) {
+        query AiringSchedule($ids: [Int], $from: Int, $page: Int) {
             Page(page: $page, perPage: 50) {
-                airingSchedules(mediaId_in: $ids, notYetAired: true, sort: [TIME]) {
+                pageInfo { hasNextPage }
+                airingSchedules(mediaId_in: $ids, airingAt_greater: $from, sort: [TIME]) {
                     episode
                     airingAt
                     media {
@@ -3154,54 +3295,87 @@ pub fn fetch_airing_schedule(app: &AppHandle) -> Result<i64, String> {
     ";
 
     let ids_json: Vec<serde_json::Value> = media_ids.iter().map(|id| json!(id)).collect();
-    let payload: AiringSchedulePayload = graphql_post(
-        &config.graphql_url,
-        &access_token,
-        &json!({ "query": gql, "variables": { "ids": ids_json, "page": 1 } }),
-    )?;
-
-    let schedules = payload.page.airing_schedules;
-    let stored = schedules.len() as i64;
 
     conn.execute("BEGIN", []).map_err(|e| e.to_string())?;
-    for s in &schedules {
-        let cover = s
-            .media
-            .cover_image
+
+    let mut stored = 0i64;
+    let mut page = 1i32;
+    loop {
+        let payload: AiringSchedulePayload = graphql_post(
+            &config.graphql_url,
+            &access_token,
+            &json!({
+                "query": gql,
+                "variables": { "ids": ids_json, "from": lookback_from, "page": page }
+            }),
+        )?;
+
+        let schedules = payload.page.airing_schedules;
+        if schedules.is_empty() {
+            break;
+        }
+
+        for s in &schedules {
+            let cover = s
+                .media
+                .cover_image
+                .as_ref()
+                .and_then(|c| c.large.as_deref());
+            let payload_json = json!({
+                "title": { "romaji": s.media.title.romaji, "english": s.media.title.english },
+                "coverImage": { "large": cover },
+                "episodes": s.media.episodes,
+            })
+            .to_string();
+
+            conn.execute(
+                "INSERT INTO airing_cache (media_id, episode, airing_at, payload_json, notified, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, 0, CURRENT_TIMESTAMP)
+                 ON CONFLICT(media_id, episode) DO UPDATE SET
+                   airing_at    = excluded.airing_at,
+                   payload_json = excluded.payload_json,
+                   updated_at   = CURRENT_TIMESTAMP",
+                (s.media.id, s.episode, s.airing_at, &payload_json),
+            )
+            .map_err(|e| e.to_string())?;
+
+            // Keep media_cache cover + title fresh so schedule joins work.
+            conn.execute(
+                "INSERT INTO media_cache (media_id, media_type, title_romaji, title_english, cover_image, payload_json, fetched_at)
+                 VALUES (?1, 'ANIME', ?2, ?3, ?4, '{}', CURRENT_TIMESTAMP)
+                 ON CONFLICT(media_id) DO UPDATE SET
+                   title_romaji  = COALESCE(excluded.title_romaji,  title_romaji),
+                   title_english = COALESCE(excluded.title_english, title_english),
+                   cover_image   = COALESCE(excluded.cover_image,   cover_image),
+                   fetched_at    = CURRENT_TIMESTAMP",
+                (s.media.id, &s.media.title.romaji, &s.media.title.english, cover),
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        stored += schedules.len() as i64;
+
+        let has_next = payload
+            .page
+            .page_info
             .as_ref()
-            .and_then(|c| c.large.as_deref());
-        let payload_json = json!({
-            "title": { "romaji": s.media.title.romaji, "english": s.media.title.english },
-            "coverImage": { "large": cover },
-            "episodes": s.media.episodes,
-        })
-        .to_string();
-
-        conn.execute(
-            "INSERT INTO airing_cache (media_id, episode, airing_at, payload_json, notified, updated_at)
-             VALUES (?1, ?2, ?3, ?4, 0, CURRENT_TIMESTAMP)
-             ON CONFLICT(media_id, episode) DO UPDATE SET
-               airing_at    = excluded.airing_at,
-               payload_json = excluded.payload_json,
-               updated_at   = CURRENT_TIMESTAMP",
-            (s.media.id, s.episode, s.airing_at, &payload_json),
-        )
-        .map_err(|e| e.to_string())?;
-
-        // Keep media_cache cover + title fresh so schedule joins work.
-        conn.execute(
-            "INSERT INTO media_cache (media_id, media_type, title_romaji, title_english, cover_image, payload_json, fetched_at)
-             VALUES (?1, 'ANIME', ?2, ?3, ?4, '{}', CURRENT_TIMESTAMP)
-             ON CONFLICT(media_id) DO UPDATE SET
-               title_romaji  = COALESCE(excluded.title_romaji,  title_romaji),
-               title_english = COALESCE(excluded.title_english, title_english),
-               cover_image   = COALESCE(excluded.cover_image,   cover_image),
-               fetched_at    = CURRENT_TIMESTAMP",
-            (s.media.id, &s.media.title.romaji, &s.media.title.english, cover),
-        )
-        .map_err(|e| e.to_string())?;
+            .map(|pi| pi.has_next_page)
+            .unwrap_or(false);
+        if !has_next || page >= 10 {
+            break;
+        }
+        page += 1;
     }
     conn.execute("COMMIT", []).map_err(|e| e.to_string())?;
+
+    // Prune stale schedule entries — episodes that aired more than a week ago
+    // only bloat the cache and are never shown meaningfully again.  The 24h
+    // lookback window above guarantees recently-aired unnotified episodes
+    // survive, so pending notifications are not lost.
+    let _ = conn.execute(
+        "DELETE FROM airing_cache WHERE airing_at < strftime('%s', 'now') - 604800",
+        [],
+    );
 
     Ok(stored)
 }

@@ -1,14 +1,16 @@
 use tauri::AppHandle;
+#[cfg(desktop)]
+use tauri::Manager;
 
 use crate::models::{
     ActivityEntry, AiringEntry, AniListConfigStatus, AniListNotificationItem, AniListViewer,
     AnnualWrapUp, AppSettings, AuthRequestPlan, AuthSessionStatus, BootstrapPayload, CacheStats,
     CharacterDetails, DatabaseInitResult, DatabaseOverview, ExportResult, FollowingActivityItem,
     GlobalAiringEntry, HeatmapDay, ImportResult, LibrarySnapshot, LibraryStats, ListEntry,
-    MediaDetails, MediaSearchResult, MonthlyActivityCount, NotificationOverride,
-    NotificationSettings, PendingConflict, PersonSearchResult, SocialUser, StaffDetails,
-    StudioDetails, StudioSearchResult, SyncLogEntry, SyncSummary, UserFavorites, UserMediaListItem,
-    UserProfile, UserSearchResult,
+    MangaReleaseMapping, MangaUpdatesSeries, MediaDetails, MediaSearchResult,
+    MonthlyActivityCount, NotificationOverride, NotificationSettings, PendingConflict,
+    PersonSearchResult, SocialUser, StaffDetails, StudioDetails, StudioSearchResult, SyncLogEntry,
+    SyncSummary, UpdateInfo, UserFavorites, UserMediaListItem, UserProfile, UserSearchResult,
 };
 
 #[tauri::command]
@@ -189,7 +191,7 @@ pub fn update_list_entry(
     completed_date: Option<String>,
     notes: Option<String>,
     custom_lists: Option<Vec<String>>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     crate::db::update_list_entry_local(
         &app,
         local_id,
@@ -203,6 +205,9 @@ pub fn update_list_entry(
         notes.clone(),
         custom_lists.clone(),
     )?;
+    // Reflect the new progress/status in the Discord Rich Presence (desktop).
+    #[cfg(desktop)]
+    crate::discord::update_for_media(&app, media_id);
     match crate::anilist::save_media_list_entry(
         &app,
         media_id,
@@ -218,12 +223,16 @@ pub fn update_list_entry(
     ) {
         Ok(()) => {
             let _ = crate::db::clear_entry_dirty(&app, local_id);
+            Ok(None)
         }
         Err(e) => {
             eprintln!("AniList sync failed for local entry {local_id}: {e}");
+            // Local save succeeded; the dirty flag will retry on next sync.
+            Ok(Some(format!(
+                "Saved locally, but AniList sync failed: {e}"
+            )))
         }
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -231,17 +240,20 @@ pub fn delete_list_entry(
     app: AppHandle,
     local_id: i64,
     anilist_entry_id: Option<i64>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     crate::db::delete_list_entry_local(&app, local_id)?;
     if let Some(anilist_id) = anilist_entry_id {
         match crate::anilist::delete_media_list_entry(&app, anilist_id) {
             Ok(()) => {}
             Err(e) => {
                 eprintln!("AniList delete failed for entry {anilist_id}: {e}");
+                return Ok(Some(format!(
+                    "Removed locally, but AniList delete failed: {e}"
+                )));
             }
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 #[tauri::command]
@@ -293,7 +305,7 @@ pub fn add_to_library(
     status: String,
     title: Option<String>,
     cover_image: Option<String>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     crate::db::add_entry_to_library(
         &app,
         media_id,
@@ -302,15 +314,21 @@ pub fn add_to_library(
         title.as_deref(),
         cover_image.as_deref(),
     )?;
+    // Adding an entry is usually the "started watching/reading" moment.
+    #[cfg(desktop)]
+    crate::discord::update_for_media(&app, media_id);
     match crate::anilist::save_media_list_entry(
         &app, media_id, &status, None, 0, 0, 0, None, None, None, None,
     ) {
-        Ok(()) => {}
+        Ok(()) => Ok(None),
         Err(e) => {
             eprintln!("AniList add failed for media {media_id}: {e}");
+            // Local insert succeeded; the dirty flag will retry on next sync.
+            Ok(Some(format!(
+                "Added locally, but AniList sync failed: {e}"
+            )))
         }
     }
-    Ok(())
 }
 
 #[tauri::command]
@@ -335,6 +353,44 @@ pub fn submit_auth_code_manually(
 #[tauri::command]
 pub fn get_media_details(app: AppHandle, media_id: i64) -> Result<MediaDetails, String> {
     crate::anilist::fetch_media_details(&app, media_id)
+}
+
+/// Search AnimeThemes.moe by anime title; returns matches with their OP/ED list.
+#[tauri::command]
+pub fn search_themes(query: String) -> Result<Vec<crate::models::ThemeAnime>, String> {
+    crate::themes::search_themes(&query)
+}
+
+/// Fetch OP/ED themes for a media entry by its locally cached title.
+#[tauri::command]
+pub fn get_themes_for_media(
+    app: AppHandle,
+    media_id: i64,
+) -> Result<Vec<crate::models::MediaTheme>, String> {
+    crate::themes::get_themes_for_media(&app, media_id)
+}
+
+/// All OP/ED themes the user starred for a media entry (local favourites).
+#[tauri::command]
+pub fn get_favorite_themes(
+    app: AppHandle,
+    media_id: i64,
+) -> Result<Vec<crate::models::FavoriteTheme>, String> {
+    crate::db::get_favorite_themes(&app, media_id)
+}
+
+/// Adds or removes a theme to/from the media's favourite list.  Returns the
+/// new state (`true` = now favourited).
+#[tauri::command]
+pub fn toggle_favorite_theme(
+    app: AppHandle,
+    media_id: i64,
+    theme_id: i64,
+    theme_type: String,
+    song_title: String,
+    artists: Vec<String>,
+) -> Result<bool, String> {
+    crate::db::toggle_favorite_theme(&app, media_id, theme_id, &theme_type, &song_title, &artists)
 }
 
 // ─── Schedule and notifications ───────────────────────────────────────────────
@@ -407,6 +463,12 @@ pub fn set_notification_override(
     crate::db::set_notification_override(&app, media_id, enabled)
 }
 
+/// Per-media "hide from Discord Rich Presence" (desktop only).
+#[tauri::command]
+pub fn set_discord_hidden(app: AppHandle, media_id: i64, hidden: bool) -> Result<(), String> {
+    crate::db::set_discord_hidden(&app, media_id, hidden)
+}
+
 #[tauri::command]
 pub fn get_anilist_notifications(
     app: AppHandle,
@@ -436,6 +498,9 @@ pub fn increment_episode_progress(
     delta: i64,
 ) -> Result<i64, String> {
     let new_progress = crate::db::increment_anime_progress(&app, media_id, delta)?;
+    // Reflect the new watch progress in the Discord Rich Presence (desktop).
+    #[cfg(desktop)]
+    crate::discord::update_for_media(&app, media_id);
     // Best-effort push; dirty flag will catch it on next sync if this fails.
     if crate::anilist::is_online() {
         let _ = crate::anilist::push_dirty_entries(&app);
@@ -498,6 +563,128 @@ pub fn get_app_settings(app: AppHandle) -> Result<AppSettings, String> {
 
 #[tauri::command]
 pub fn save_app_settings(app: AppHandle, settings: AppSettings) -> Result<(), String> {
+    crate::db::save_app_settings(&app, &settings)
+}
+
+// ─── Auto-updater ─────────────────────────────────────────────────────────────
+
+/// Checks GitHub Releases for a newer version.  `force` bypasses the 24 h
+/// throttle (manual "Check for updates" from About); a user-skipped version is
+/// still respected.
+#[tauri::command]
+pub async fn check_for_updates(app: AppHandle, force: bool) -> Result<Option<UpdateInfo>, String> {
+    crate::updater::check_for_updates(&app, force).await
+}
+
+/// Downloads + installs the latest release, then restarts the app.  Runs on
+/// the Tauri async runtime (never the main thread) and streams progress to
+/// the `updater://progress` event.
+#[tauri::command]
+pub async fn install_update(app: AppHandle) -> Result<(), String> {
+    crate::updater::install_update(&app).await
+}
+
+/// Remembers a version the user asked to skip so it stops being offered.
+/// A manual "Check for updates" (force) resets it, so a skipped version can
+/// always be reconsidered.
+#[tauri::command]
+pub fn skip_update_version(app: AppHandle, version: String) -> Result<(), String> {
+    crate::updater::skip_update_version(&app, &version)
+}
+
+// ─── MangaUpdates release tracking ──────────────────────────────────────────
+
+/// Search MangaUpdates by title (public API, no auth) — used by the manual
+/// "replace link" UI in Settings.  Runs off the main thread: the call hits the
+/// network with a 15s timeout, and sync commands would freeze the UI.
+#[tauri::command]
+pub async fn search_mangaupdates_series(
+    query: String,
+) -> Result<Vec<MangaUpdatesSeries>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::manga_releases::search_series(&query)
+    })
+    .await
+    .map_err(|e| format!("[MANGA_RELEASES] search task failed: {e}"))?
+}
+
+/// All stored AniList→MangaUpdates links (for the Settings UI).
+#[tauri::command]
+pub fn get_manga_release_mappings(app: AppHandle) -> Result<Vec<MangaReleaseMapping>, String> {
+    crate::db::get_manga_release_mappings(&app)
+}
+
+/// Manually (re)link a manga entry to a MangaUpdates series — used when the
+/// auto-resolution picked the wrong title.  Marks the link as manual so auto-
+/// resolution never overrides it.
+#[tauri::command]
+pub fn set_manga_release_mapping(
+    app: AppHandle,
+    media_id: i64,
+    mu_series_id: i64,
+    mu_title: String,
+) -> Result<(), String> {
+    // Look up the entry's media type; default to MANGA for entries that only
+    // exist in the cache.
+    let media_type = crate::db::get_list_entry_by_media_id(&app, media_id)?
+        .map(|e| e.media_type)
+        .unwrap_or_else(|| "MANGA".to_string());
+    crate::db::set_manga_release_mapping(&app, media_id, &media_type, mu_series_id, &mu_title, true)
+}
+
+/// Remove a MangaUpdates link (stops tracking that entry).
+#[tauri::command]
+pub fn clear_manga_release_mapping(app: AppHandle, media_id: i64) -> Result<(), String> {
+    crate::db::clear_manga_release_mapping(&app, media_id)
+}
+
+/// Poll tracked manga right now and return how many notifications were sent.
+/// Runs off the main thread — the poll can take tens of seconds with one
+/// paced request per tracked series, and sync commands would block the UI.
+#[tauri::command]
+pub async fn check_manga_releases(app: AppHandle) -> Result<i64, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::manga_releases::poll_manga_releases(&app)
+    })
+    .await
+    .map_err(|e| format!("[MANGA_RELEASES] poll task failed: {e}"))?
+}
+
+/// Toggle Discord Rich Presence and persist the preference.  On desktop,
+/// enabling connects the RPC client and shows a browsing activity; disabling
+/// clears whatever activity is currently shown.
+#[tauri::command]
+pub fn set_discord_rpc(app: AppHandle, enabled: bool) -> Result<(), String> {
+    let mut settings = crate::db::get_app_settings(&app)?;
+    settings.discord_rpc_enabled = enabled;
+    crate::db::save_app_settings(&app, &settings)?;
+
+    #[cfg(desktop)]
+    if enabled {
+        crate::discord::show_browsing(&app);
+    } else {
+        crate::discord::clear_presence(&app);
+    }
+    Ok(())
+}
+
+/// Toggle the main window's "always on top" state (desktop only) and persist
+/// the preference so it's restored on the next launch.  A no-op on mobile,
+/// where there is no desktop window to float.
+#[tauri::command]
+pub fn set_always_on_top(app: AppHandle, enabled: bool) -> Result<(), String> {
+    #[cfg(desktop)]
+    {
+        if let Some(window) = app.get_webview_window("main") {
+            window
+                .set_always_on_top(enabled)
+                .map_err(|e| format!("Failed to set always-on-top: {e}"))?;
+        }
+    }
+
+    // Persist regardless of platform so the setting round-trips cleanly.
+    let mut settings = crate::db::get_app_settings(&app)?;
+    settings.always_on_top = enabled;
     crate::db::save_app_settings(&app, &settings)
 }
 

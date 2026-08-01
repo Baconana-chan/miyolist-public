@@ -398,6 +398,8 @@ pub struct NotificationSettings {
     pub follows_enabled: bool,
     pub media_enabled: bool,
     pub submissions_enabled: bool,
+    /// New-chapter alerts for manga via the MangaUpdates release indexer.
+    pub manga_releases_enabled: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -405,6 +407,9 @@ pub struct NotificationSettings {
 pub struct NotificationOverride {
     pub media_id: i64,
     pub enabled: bool,
+    /// Per-media "hide from Discord Rich Presence" (desktop).  Independent of
+    /// `enabled` — a title can still notify but stay out of Discord status.
+    pub discord_hidden: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -560,6 +565,13 @@ pub struct AppSettings {
     pub score_format: String,
     /// Hide app to system tray when the main window close button is pressed.
     pub minimize_to_tray_on_close: bool,
+    /// JSON delta map of keyboard shortcuts (action → combo), see
+    /// `src/shared/shortcuts.ts` for the action ids and default combos.
+    pub keyboard_shortcuts: String,
+    /// Keep the main window above other windows (desktop only).
+    pub always_on_top: bool,
+    /// Show Discord Rich Presence when list progress changes (desktop only).
+    pub discord_rpc_enabled: bool,
 }
 
 impl Default for AppSettings {
@@ -575,6 +587,9 @@ impl Default for AppSettings {
             last_synced_at: None,
             score_format: "POINT_10_DECIMAL".into(),
             minimize_to_tray_on_close: false,
+            keyboard_shortcuts: String::new(),
+            always_on_top: false,
+            discord_rpc_enabled: false,
         }
     }
 }
@@ -807,6 +822,119 @@ pub struct UserMediaListItem {
 }
 
 // ─── People / search results ──────────────────────────────────────────────────
+
+// ─── AnimeThemes.moe (OP/ED) ──────────────────────────────────────────────────
+
+/// A playable video file for one theme entry (OP/ED).  `link` is the direct
+/// file URL served from `v.animethemes.moe`.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeVideo {
+    pub id: i64,
+    pub link: String,
+    pub basename: Option<String>,
+    pub resolution: Option<i64>,
+    pub nc: bool,
+    pub subbed: bool,
+    pub lyrics: bool,
+    pub uncen: bool,
+    pub tags: Option<String>,
+}
+
+/// One concrete version of a theme (e.g. "OP1 · episodes 1-16").
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeEntry {
+    pub id: i64,
+    pub episodes: Option<String>,
+    pub version: Option<i64>,
+    pub videos: Vec<ThemeVideo>,
+}
+
+/// A single OP/ED with its song metadata and all video versions.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaTheme {
+    pub id: i64,
+    /// `"OP"` | `"ED"` | `"IN"`
+    pub theme_type: String,
+    pub sequence: Option<i64>,
+    pub song_title: String,
+    pub artists: Vec<String>,
+    pub entries: Vec<ThemeEntry>,
+}
+
+/// An anime match from AnimeThemes.moe — used by the search command and as the
+/// container for a media's theme list.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeAnime {
+    pub id: i64,
+    pub name: String,
+    pub slug: String,
+    pub media_format: Option<String>,
+    pub year: Option<i64>,
+    pub themes: Vec<MediaTheme>,
+}
+
+/// One row of the `favorite_themes` table — an OP/ED the user starred on a
+/// media entry so it stands out in the theme list.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoriteTheme {
+    pub media_id: i64,
+    pub theme_id: i64,
+    /// `"OP"` | `"ED"` | `"IN"`
+    pub theme_type: String,
+    pub song_title: String,
+    pub artists: Vec<String>,
+    pub added_at: String,
+}
+
+// ─── MangaUpdates (release indexer) ───────────────────────────────────────────
+
+/// An available app update returned by the GitHub Releases check.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateInfo {
+    /// Version of the available update, e.g. `"2.1.0"`.
+    pub version: String,
+    /// Version currently installed.
+    pub current_version: String,
+    /// Release publish date (RFC 3339), when the manifest provides one.
+    pub date: Option<String>,
+    /// Release notes / changelog excerpt.
+    pub body: Option<String>,
+}
+
+/// A MangaUpdates series match returned by the search command.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaUpdatesSeries {
+    pub series_id: i64,
+    pub title: String,
+    pub url: String,
+    pub series_type: Option<String>,
+    pub year: Option<String>,
+}
+
+/// One row of the `manga_release_cache` table — the link between an AniList
+/// manga entry and its MangaUpdates series, plus the high-water mark of which
+/// release items have already been notified.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MangaReleaseMapping {
+    pub media_id: i64,
+    pub media_type: String,
+    /// Media title from `media_cache` (fallback: numeric id).
+    pub title: String,
+    pub mu_series_id: Option<i64>,
+    pub mu_title: Option<String>,
+    /// Title of the newest RSS item already notified (high-water mark).
+    pub last_item_title: Option<String>,
+    /// `true` when the user manually picked the link.
+    pub manual: bool,
+}
 
 /// Result for character or staff search.
 #[derive(Clone, Serialize)]

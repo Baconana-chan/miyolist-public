@@ -570,8 +570,10 @@ function LoginView({ onAuthenticated }: { onAuthenticated: (s: AuthSessionStatus
 // ─── Root export ─────────────────────────────────────────────────────────────
 
 export function AuthSurface({ session, onAuthenticated, onLogout }: AuthSurfaceProps) {
-  // When accessed from the sidebar while logged in
-  if (session?.hasAccessToken) {
+  // When accessed from the sidebar while logged in.  An expired token is NOT
+  // a usable session: AppShell routes there so the user can sign in again,
+  // so an expired session must show the login flow instead of AccountView.
+  if (session?.hasAccessToken && !session.isTokenExpired) {
     return (
       <AccountView
         session={session}
