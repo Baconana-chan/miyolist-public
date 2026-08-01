@@ -17,6 +17,19 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# ── Vendored crates ───────────────────────────────────────────────────────
+# proc-macro-error2 is archived upstream (RUSTSEC-2026-0173) and its code
+# (pub use of a private `extern crate proc_macro;`) will be rejected by a
+# future Rust (rust-lang/rust#127909). We vendor the crate with that one-line
+# fix applied; see vendor/proc-macro-error2/README.md.
+[patch.crates-io]
+proc-macro-error2 = { path = "vendor/proc-macro-error2" }
+
+# Keep the vendored crate out of the workspace so `cargo fmt --all` and
+# `cargo clippy` do not reformat/lint third-party code.
+[workspace]
+exclude = ["vendor/proc-macro-error2"]
+
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"

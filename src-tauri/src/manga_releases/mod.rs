@@ -109,7 +109,9 @@ pub fn search_series(query: &str) -> Result<Vec<MangaUpdatesSeries>, String> {
 
     if !response.status().is_success() {
         let status = response.status();
-        return Err(format!("[MU_HTTP_ERROR] MangaUpdates returned HTTP {status}"));
+        return Err(format!(
+            "[MU_HTTP_ERROR] MangaUpdates returned HTTP {status}"
+        ));
     }
 
     let parsed: SearchEnvelope = response
@@ -156,16 +158,14 @@ pub fn resolve_series(title: &str) -> Option<(i64, String)> {
         .filter(|s| !is_noise_title(&s.title))
         .collect();
 
-    let exact = clean
-        .iter()
-        .find(|s| s.title.to_lowercase() == lower);
+    let exact = clean.iter().find(|s| s.title.to_lowercase() == lower);
     if let Some(series) = exact {
         return Some((series.series_id, series.title.clone()));
     }
 
-    let contains = clean
-        .iter()
-        .find(|s| s.title.to_lowercase().contains(&lower) || lower.contains(&s.title.to_lowercase()));
+    let contains = clean.iter().find(|s| {
+        s.title.to_lowercase().contains(&lower) || lower.contains(&s.title.to_lowercase())
+    });
     if let Some(series) = contains {
         return Some((series.series_id, series.title.clone()));
     }
@@ -185,7 +185,9 @@ fn fetch_series_releases(series_id: i64) -> Result<Vec<RssItem>, String> {
 
     if !response.status().is_success() {
         let status = response.status();
-        return Err(format!("[MU_HTTP_ERROR] MangaUpdates RSS returned HTTP {status}"));
+        return Err(format!(
+            "[MU_HTTP_ERROR] MangaUpdates RSS returned HTTP {status}"
+        ));
     }
 
     let xml = response
@@ -199,7 +201,10 @@ fn fetch_series_releases(series_id: i64) -> Result<Vec<RssItem>, String> {
 /// entity escapes are handled properly.
 fn parse_rss(xml: &str) -> Vec<RssItem> {
     let mut items = Vec::new();
-    let mut current: RssItem = RssItem { title: String::new(), group: String::new() };
+    let mut current: RssItem = RssItem {
+        title: String::new(),
+        group: String::new(),
+    };
     let mut in_item = false;
     let mut in_title = false;
     let mut in_desc = false;
@@ -212,7 +217,10 @@ fn parse_rss(xml: &str) -> Vec<RssItem> {
                 match e.name().as_ref() {
                     b"item" => {
                         in_item = true;
-                        current = RssItem { title: String::new(), group: String::new() };
+                        current = RssItem {
+                            title: String::new(),
+                            group: String::new(),
+                        };
                     }
                     b"title" if in_item => in_title = true,
                     b"description" if in_item => in_desc = true,
@@ -297,25 +305,23 @@ pub fn poll_manga_releases(app: &AppHandle) -> Result<i64, String> {
         let mapping = crate::db::get_manga_release_mapping(app, media_id)?;
         let series_id = match mapping.as_ref().and_then(|m| m.mu_series_id) {
             Some(id) => id,
-            None => {
-                match resolve_series(&title) {
-                    Some((id, mu_title)) => {
-                        let _ = crate::db::set_manga_release_mapping(
-                            app,
-                            media_id,
-                            &media_type,
-                            id,
-                            &mu_title,
-                            false,
-                        );
-                        id
-                    }
-                    None => {
-                        eprintln!("[MANGA_RELEASES] Could not auto-link \"{title}\" on MangaUpdates");
-                        continue;
-                    }
+            None => match resolve_series(&title) {
+                Some((id, mu_title)) => {
+                    let _ = crate::db::set_manga_release_mapping(
+                        app,
+                        media_id,
+                        &media_type,
+                        id,
+                        &mu_title,
+                        false,
+                    );
+                    id
                 }
-            }
+                None => {
+                    eprintln!("[MANGA_RELEASES] Could not auto-link \"{title}\" on MangaUpdates");
+                    continue;
+                }
+            },
         };
 
         // Don't notify for entries the user manually muted.

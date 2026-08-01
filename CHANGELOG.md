@@ -6,6 +6,8 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-01
+
 ### Added
 - **Auto-updater** — checks GitHub Releases once a day (throttled), with a manual "Check for
   updates" button in the About dialog. `UpdateDialog` offers Download & Install (with a real
@@ -43,8 +45,6 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Tray Quick Sync running on the main thread (now off-thread).
 - Dead `Volume{...}` expression in `EntryEditModal`.
 
-### Notes
-- Requires the updater signing keypair to be configured before the first release.
 
 ## [2.0.0] - 2026-04-24
 

@@ -104,18 +104,18 @@ fn fetch_anime(query: &str) -> Result<Vec<ApiAnime>, String> {
     let response = client()
         .get(API_BASE)
         .query(&[("q", query)])
-        .query(&[
-            (
-                "include",
-                "animethemes.animethemeentries.videos,animethemes.song.artists",
-            ),
-        ])
+        .query(&[(
+            "include",
+            "animethemes.animethemeentries.videos,animethemes.song.artists",
+        )])
         .send()
         .map_err(|e| format!("[THEMES_NETWORK_ERROR] AnimeThemes request failed: {e}"))?;
 
     if !response.status().is_success() {
         let status = response.status();
-        return Err(format!("[THEMES_HTTP_ERROR] AnimeThemes returned HTTP {status}"));
+        return Err(format!(
+            "[THEMES_HTTP_ERROR] AnimeThemes returned HTTP {status}"
+        ));
     }
 
     let parsed: ApiEnvelope = response
@@ -231,5 +231,8 @@ pub fn get_themes_for_media(app: &AppHandle, media_id: i64) -> Result<Vec<MediaT
         .or_else(|| results.first())
         .cloned();
 
-    Ok(chosen.map(api_anime_to_model).map(|a| a.themes).unwrap_or_default())
+    Ok(chosen
+        .map(api_anime_to_model)
+        .map(|a| a.themes)
+        .unwrap_or_default())
 }

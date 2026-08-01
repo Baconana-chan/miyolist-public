@@ -94,13 +94,7 @@ fn schedule_window_bounds_save(app: &tauri::AppHandle) {
                 return;
             }
             if let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) {
-                let _ = crate::db::save_window_bounds(
-                    &app,
-                    pos.x,
-                    pos.y,
-                    size.width,
-                    size.height,
-                );
+                let _ = crate::db::save_window_bounds(&app, pos.x, pos.y, size.width, size.height);
             }
         }
     });

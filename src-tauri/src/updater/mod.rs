@@ -144,9 +144,10 @@ pub async fn check_for_updates(app: &AppHandle, force: bool) -> Result<Option<Up
         current_version: update.current_version.clone(),
         // Strict RFC 3339 so the frontend's `new Date(...)` parses reliably
         // (OffsetDateTime's Display format is not strict RFC 3339).
-        date: update
-            .date
-            .and_then(|d| d.format(&time::format_description::well_known::Rfc3339).ok()),
+        date: update.date.and_then(|d| {
+            d.format(&time::format_description::well_known::Rfc3339)
+                .ok()
+        }),
         body: update.body.clone(),
     }))
 }

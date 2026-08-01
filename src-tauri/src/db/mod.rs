@@ -10,8 +10,8 @@ use tauri::{AppHandle, Manager};
 use crate::models::{
     ActivityEntry, AppSettings, BreakdownItem, CacheStats, DatabaseInitResult, DatabaseOverview,
     DatabaseTableInfo, ExportResult, FavoriteTheme, FoundationModule, HeatmapDay, ImportResult,
-    LibrarySnapshot, LibraryStats, MangaReleaseMapping, MonthlyActivityCount,
-    NotificationOverride, NotificationSettings, PendingConflict, ScoreBucket, SyncLogEntry,
+    LibrarySnapshot, LibraryStats, MangaReleaseMapping, MonthlyActivityCount, NotificationOverride,
+    NotificationSettings, PendingConflict, ScoreBucket, SyncLogEntry,
 };
 
 const DATABASE_FILE_NAME: &str = "miyolist.sqlite3";
@@ -109,7 +109,10 @@ pub(crate) struct PooledConnection {
 
 impl PooledConnection {
     fn new(path: PathBuf, conn: Connection) -> Self {
-        Self { path, conn: Some(conn) }
+        Self {
+            path,
+            conn: Some(conn),
+        }
     }
 }
 
@@ -142,8 +145,9 @@ impl Drop for PooledConnection {
             if let Ok(mut guard) = pool.lock() {
                 let idle = guard.entry(self.path.clone()).or_default();
                 if idle.len() < MAX_IDLE_CONNECTIONS {
+                    // conn is moved into the pool here; dropping out of the
+                    // block is equivalent to returning early.
                     idle.push(conn);
-                    return;
                 }
             }
         }
@@ -1587,8 +1591,9 @@ pub fn get_notification_overrides(
 
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
-    let mut sql =
-        String::from("SELECT media_id, enabled, discord_hidden FROM notification_overrides WHERE media_id IN (");
+    let mut sql = String::from(
+        "SELECT media_id, enabled, discord_hidden FROM notification_overrides WHERE media_id IN (",
+    );
     for index in 0..media_ids.len() {
         if index > 0 {
             sql.push(',');
@@ -1620,11 +1625,7 @@ pub fn get_notification_overrides(
 /// on `notification_overrides`.  Independent of the notification `enabled`
 /// flag — a title can still produce notifications while staying out of the
 /// user's Discord status.
-pub fn set_discord_hidden(
-    app: &AppHandle,
-    media_id: i64,
-    hidden: bool,
-) -> Result<(), String> {
+pub fn set_discord_hidden(app: &AppHandle, media_id: i64, hidden: bool) -> Result<(), String> {
     let database_path = database_path(app)?;
     let conn = open_connection(&database_path)?;
     conn.execute(
@@ -1720,8 +1721,7 @@ pub fn toggle_favorite_theme(
         .map_err(|e| e.to_string())?;
         Ok(false)
     } else {
-        let artists_json =
-            serde_json::to_string(artists).unwrap_or_else(|_| "[]".to_string());
+        let artists_json = serde_json::to_string(artists).unwrap_or_else(|_| "[]".to_string());
         conn.execute(
             "INSERT INTO favorite_themes (media_id, theme_id, theme_type, song_title, artists, added_at)
              VALUES (?1, ?2, ?3, ?4, ?5, CURRENT_TIMESTAMP)
@@ -1761,6 +1761,7 @@ pub fn set_notification_override(
 /// Returns manga/novel list entries that are candidates for chapter-release
 /// tracking: `CURRENT`/`REPEATING` status, any `MANGA`/`NOVEL` list kind.
 /// Tuple: `(media_id, media_type, title, cover_image)`.
+#[allow(clippy::type_complexity)]
 pub fn get_tracked_manga(
     app: &AppHandle,
 ) -> Result<Vec<(i64, String, String, Option<String>)>, String> {
@@ -2741,11 +2742,7 @@ pub fn save_app_settings(app: &AppHandle, settings: &AppSettings) -> Result<(), 
         ("keyboard_shortcuts", settings.keyboard_shortcuts.as_str()),
         (
             "always_on_top",
-            if settings.always_on_top {
-                "1"
-            } else {
-                "0"
-            },
+            if settings.always_on_top { "1" } else { "0" },
         ),
         (
             "discord_rpc_enabled",
@@ -3203,7 +3200,7 @@ pub fn export_database_backup(app: &AppHandle) -> Result<ExportResult, String> {
     let mut suffix = 0;
     while dest.exists() {
         suffix += 1;
-        dest = export_dir.join(&format!("miyolist_{timestamp}_{suffix}.sqlite3"));
+        dest = export_dir.join(format!("miyolist_{timestamp}_{suffix}.sqlite3"));
     }
 
     let dest_str = dest.to_string_lossy().replace('\'', "''");

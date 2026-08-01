@@ -95,8 +95,11 @@ static ONLINE_PROBE_CLIENT: OnceLock<Client> = OnceLock::new();
 
 /// Identify the app in outgoing HTTP headers.  Some endpoints reject
 /// "naked" requests without a User-Agent.
-const APP_USER_AGENT: &str =
-    concat!("miyolist/", env!("CARGO_PKG_VERSION"), " (+https://github.com/baconana/miyolist)");
+const APP_USER_AGENT: &str = concat!(
+    "miyolist/",
+    env!("CARGO_PKG_VERSION"),
+    " (+https://github.com/baconana/miyolist)"
+);
 
 fn http_client() -> &'static Client {
     HTTP_CLIENT.get_or_init(|| {
@@ -2293,9 +2296,17 @@ pub fn fetch_user_lists_delta(
         // single `IN (...)` query, instead of one SELECT per entry (~50
         // queries per page, ~2500 on a full 2.5k-entry sync).  This is the
         // single biggest SQL win of the whole sync loop.
+        #[allow(clippy::type_complexity)]
         let mut local_state: HashMap<
             i64,
-            (i64, Option<i64>, Option<String>, Option<f64>, i64, Option<String>),
+            (
+                i64,
+                Option<i64>,
+                Option<String>,
+                Option<f64>,
+                i64,
+                Option<String>,
+            ),
         > = HashMap::new();
         if !entries.is_empty() {
             let placeholders = vec!["?"; entries.len()].join(",");

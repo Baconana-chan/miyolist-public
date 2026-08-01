@@ -7,10 +7,10 @@ use crate::models::{
     AnnualWrapUp, AppSettings, AuthRequestPlan, AuthSessionStatus, BootstrapPayload, CacheStats,
     CharacterDetails, DatabaseInitResult, DatabaseOverview, ExportResult, FollowingActivityItem,
     GlobalAiringEntry, HeatmapDay, ImportResult, LibrarySnapshot, LibraryStats, ListEntry,
-    MangaReleaseMapping, MangaUpdatesSeries, MediaDetails, MediaSearchResult,
-    MonthlyActivityCount, NotificationOverride, NotificationSettings, PendingConflict,
-    PersonSearchResult, SocialUser, StaffDetails, StudioDetails, StudioSearchResult, SyncLogEntry,
-    SyncSummary, UpdateInfo, UserFavorites, UserMediaListItem, UserProfile, UserSearchResult,
+    MangaReleaseMapping, MangaUpdatesSeries, MediaDetails, MediaSearchResult, MonthlyActivityCount,
+    NotificationOverride, NotificationSettings, PendingConflict, PersonSearchResult, SocialUser,
+    StaffDetails, StudioDetails, StudioSearchResult, SyncLogEntry, SyncSummary, UpdateInfo,
+    UserFavorites, UserMediaListItem, UserProfile, UserSearchResult,
 };
 
 #[tauri::command]
@@ -228,9 +228,7 @@ pub fn update_list_entry(
         Err(e) => {
             eprintln!("AniList sync failed for local entry {local_id}: {e}");
             // Local save succeeded; the dirty flag will retry on next sync.
-            Ok(Some(format!(
-                "Saved locally, but AniList sync failed: {e}"
-            )))
+            Ok(Some(format!("Saved locally, but AniList sync failed: {e}")))
         }
     }
 }
@@ -324,9 +322,7 @@ pub fn add_to_library(
         Err(e) => {
             eprintln!("AniList add failed for media {media_id}: {e}");
             // Local insert succeeded; the dirty flag will retry on next sync.
-            Ok(Some(format!(
-                "Added locally, but AniList sync failed: {e}"
-            )))
+            Ok(Some(format!("Added locally, but AniList sync failed: {e}")))
         }
     }
 }
@@ -598,14 +594,10 @@ pub fn skip_update_version(app: AppHandle, version: String) -> Result<(), String
 /// "replace link" UI in Settings.  Runs off the main thread: the call hits the
 /// network with a 15s timeout, and sync commands would freeze the UI.
 #[tauri::command]
-pub async fn search_mangaupdates_series(
-    query: String,
-) -> Result<Vec<MangaUpdatesSeries>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::manga_releases::search_series(&query)
-    })
-    .await
-    .map_err(|e| format!("[MANGA_RELEASES] search task failed: {e}"))?
+pub async fn search_mangaupdates_series(query: String) -> Result<Vec<MangaUpdatesSeries>, String> {
+    tauri::async_runtime::spawn_blocking(move || crate::manga_releases::search_series(&query))
+        .await
+        .map_err(|e| format!("[MANGA_RELEASES] search task failed: {e}"))?
 }
 
 /// All stored AniList→MangaUpdates links (for the Settings UI).
@@ -643,11 +635,9 @@ pub fn clear_manga_release_mapping(app: AppHandle, media_id: i64) -> Result<(), 
 /// paced request per tracked series, and sync commands would block the UI.
 #[tauri::command]
 pub async fn check_manga_releases(app: AppHandle) -> Result<i64, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        crate::manga_releases::poll_manga_releases(&app)
-    })
-    .await
-    .map_err(|e| format!("[MANGA_RELEASES] poll task failed: {e}"))?
+    tauri::async_runtime::spawn_blocking(move || crate::manga_releases::poll_manga_releases(&app))
+        .await
+        .map_err(|e| format!("[MANGA_RELEASES] poll task failed: {e}"))?
 }
 
 /// Toggle Discord Rich Presence and persist the preference.  On desktop,

@@ -71,7 +71,9 @@ fn ensure_client() -> bool {
         }
         return false;
     }
-    let mut guard = CLIENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = CLIENT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if guard.is_none() {
         let mut client = Client::new(id);
         client.start();
@@ -86,7 +88,9 @@ pub fn show_browsing(app: &AppHandle) {
     if !is_enabled(app) || !ensure_client() {
         return;
     }
-    let mut guard = CLIENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = CLIENT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(client) = guard.as_mut() {
         let _ = client.set_activity(|act| {
             act.details("Browsing their anime list")
@@ -147,7 +151,9 @@ pub fn update_for_media(app: &AppHandle, media_id: i64) {
     let cover = entry.cover_image;
     let large_text = title.clone();
 
-    let mut guard = CLIENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = CLIENT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(client) = guard.as_mut() {
         let _ = client.set_activity(|act| {
             let act = act
@@ -167,7 +173,9 @@ pub fn update_for_media(app: &AppHandle, media_id: i64) {
 /// Clear the current activity (used when the toggle is switched off).
 /// The client itself stays alive and reconnects in the background.
 pub fn clear_presence(_app: &AppHandle) {
-    let mut guard = CLIENT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut guard = CLIENT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Some(client) = guard.as_mut() {
         let _ = client.clear_activity();
     }
